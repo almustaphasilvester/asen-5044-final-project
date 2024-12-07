@@ -1,0 +1,92 @@
+\documentclass{article}
+\usepackage{geometry}
+\usepackage{titling}
+\usepackage{amsmath}
+
+\title{Final Project Outline}
+\author{Silvester, Almustapha\\ 
+\and
+Tran, Angelica Jane
+\and
+Iskander, Fatah}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\section{Part 1}
+
+\begin{equation}
+    \rho = \sqrt{(X-X_i)^2 + (Y-Y_i)^2}
+\end{equation}
+
+\begin{equation}
+    \dot{\rho} = \frac{(X-X_i)*(\dot{X}-\dot{X_i})+(Y-Y_i)*(\dot{Y}-\dot{Y_i})}{\rho}
+\end{equation}
+
+\begin{equation}
+    \phi = \arctan(\frac{Y-Y_i}{X-X_i})
+\end{equation}
+
+\subsection{Section 1}
+
+The partial derivatives of equations (1), (2), and (3) with respect to $X$, $\dot{X}$, $Y$, and $\dot{Y}$ are:
+
+For equation (1), $\rho = \sqrt{(X-X_i)^2 + (Y-Y_i)^2}$:
+
+\begin{align*}
+    \frac{\partial \rho}{\partial X} &= \frac{\partial}{\partial X} \sqrt{(X-X_i)^2 + (Y-Y_i)^2} \\
+    &= \frac{1}{2\sqrt{(X-X_i)^2 + (Y-Y_i)^2}} \cdot \frac{\partial}{\partial X}[(X-X_i)^2 + (Y-Y_i)^2] \\
+    &= \frac{1}{2\sqrt{(X-X_i)^2 + (Y-Y_i)^2}} \cdot 2(X-X_i) \\
+    &= \frac{X-X_i}{\sqrt{(X-X_i)^2 + (Y-Y_i)^2}} \\
+    &= \frac{X-X_i}{\rho} \\[10pt]
+    \frac{\partial \rho}{\partial \dot{X}} &= \frac{\partial}{\partial \dot{X}} \sqrt{(X-X_i)^2 + (Y-Y_i)^2} = 0 \\[10pt]
+    \frac{\partial \rho}{\partial Y} &= \frac{\partial}{\partial Y} \sqrt{(X-X_i)^2 + (Y-Y_i)^2} \\
+    &= \frac{1}{2\sqrt{(X-X_i)^2 + (Y-Y_i)^2}} \cdot \frac{\partial}{\partial Y}[(X-X_i)^2 + (Y-Y_i)^2] \\
+    &= \frac{1}{2\sqrt{(X-X_i)^2 + (Y-Y_i)^2}} \cdot 2(Y-Y_i) \\
+    &= \frac{Y-Y_i}{\sqrt{(X-X_i)^2 + (Y-Y_i)^2}} \\
+    &= \frac{Y-Y_i}{\rho} \\[10pt]
+    \frac{\partial \rho}{\partial \dot{Y}} &= \frac{\partial}{\partial \dot{Y}} \sqrt{(X-X_i)^2 + (Y-Y_i)^2} = 0
+\end{align*}
+
+For equation (2), $\dot{\rho} = \frac{(X-X_i)(\dot{X}-\dot{X_i})+(Y-Y_i)(\dot{Y}-\dot{Y_i})}{\sqrt{(X-X_i)^2 + (Y-Y_i)^2}}$:
+\begin{align*}
+    \frac{\partial \dot{\rho}}{\partial X} &= \frac{\partial}{\partial X} \left[\frac{(X-X_i)(\dot{X}-\dot{X_i})+(Y-Y_i)(\dot{Y}-\dot{Y_i})}{\sqrt{(X-X_i)^2 + (Y-Y_i)^2}}\right] \\
+    &= \frac{(\dot{X}-\dot{X_i})\sqrt{(X-X_i)^2 + (Y-Y_i)^2} - [(X-X_i)(\dot{X}-\dot{X_i})+(Y-Y_i)(\dot{Y}-\dot{Y_i})]\frac{X-X_i}{\sqrt{(X-X_i)^2 + (Y-Y_i)^2}}}{(X-X_i)^2 + (Y-Y_i)^2} \\
+    &= \frac{(\dot{X}-\dot{X_i})\rho - \dot{\rho}\rho\frac{X-X_i}{\rho}}{\rho^2} \\
+    &= \frac{\dot{X}-\dot{X_i}}{\rho} - \frac{\dot{\rho}(X-X_i)}{\rho^2} \\[10pt]
+    \frac{\partial \dot{\rho}}{\partial \dot{X}} &= \frac{\partial}{\partial \dot{X}} \left[\frac{(X-X_i)(\dot{X}-\dot{X_i})+(Y-Y_i)(\dot{Y}-\dot{Y_i})}{\sqrt{(X-X_i)^2 + (Y-Y_i)^2}}\right] \\
+    &= \frac{X-X_i}{\sqrt{(X-X_i)^2 + (Y-Y_i)^2}} \\
+    &= \frac{X-X_i}{\rho} \\[10pt]
+    \frac{\partial \dot{\rho}}{\partial Y} &= \frac{\partial}{\partial Y} \left[\frac{(X-X_i)(\dot{X}-\dot{X_i})+(Y-Y_i)(\dot{Y}-\dot{Y_i})}{\sqrt{(X-X_i)^2 + (Y-Y_i)^2}}\right] \\
+    &= \frac{(\dot{Y}-\dot{Y_i})\sqrt{(X-X_i)^2 + (Y-Y_i)^2} - [(X-X_i)(\dot{X}-\dot{X_i})+(Y-Y_i)(\dot{Y}-\dot{Y_i})]\frac{Y-Y_i}{\sqrt{(X-X_i)^2 + (Y-Y_i)^2}}}{(X-X_i)^2 + (Y-Y_i)^2} \\
+    &= \frac{(\dot{Y}-\dot{Y_i})\rho - \dot{\rho}\rho\frac{Y-Y_i}{\rho}}{\rho^2} \\
+    &= \frac{\dot{Y}-\dot{Y_i}}{\rho} - \frac{\dot{\rho}(Y-Y_i)}{\rho^2} \\[10pt]
+    \frac{\partial \dot{\rho}}{\partial \dot{Y}} &= \frac{\partial}{\partial \dot{Y}} \left[\frac{(X-X_i)(\dot{X}-\dot{X_i})+(Y-Y_i)(\dot{Y}-\dot{Y_i})}{\sqrt{(X-X_i)^2 + (Y-Y_i)^2}}\right] \\
+    &= \frac{Y-Y_i}{\sqrt{(X-X_i)^2 + (Y-Y_i)^2}} \\
+    &= \frac{Y-Y_i}{\rho}
+\end{align*}
+
+For equation (3), $\phi = \arctan(\frac{Y-Y_i}{X-X_i})$:
+\begin{align*}
+    \frac{\partial \phi}{\partial X} &= \frac{\partial}{\partial X} \arctan\left(\frac{Y-Y_i}{X-X_i}\right) \\
+    &= \frac{1}{1+\left(\frac{Y-Y_i}{X-X_i}\right)^2} \cdot \frac{\partial}{\partial X}\left(\frac{Y-Y_i}{X-X_i}\right) \\
+    &= \frac{1}{1+\left(\frac{Y-Y_i}{X-X_i}\right)^2} \cdot \frac{-(Y-Y_i)}{(X-X_i)^2} \\
+    &= -\frac{Y-Y_i}{(X-X_i)^2 + (Y-Y_i)^2} \\[10pt]
+    \frac{\partial \phi}{\partial \dot{X}} &= \frac{\partial}{\partial \dot{X}} \arctan\left(\frac{Y-Y_i}{X-X_i}\right) = 0 \\[10pt]
+    \frac{\partial \phi}{\partial Y} &= \frac{\partial}{\partial Y} \arctan\left(\frac{Y-Y_i}{X-X_i}\right) \\
+    &= \frac{1}{1+\left(\frac{Y-Y_i}{X-X_i}\right)^2} \cdot \frac{\partial}{\partial Y}\left(\frac{Y-Y_i}{X-X_i}\right) \\
+    &= \frac{1}{1+\left(\frac{Y-Y_i}{X-X_i}\right)^2} \cdot \frac{1}{X-X_i} \\
+    &= \frac{X-X_i}{(X-X_i)^2 + (Y-Y_i)^2} \\[10pt]
+    \frac{\partial \phi}{\partial \dot{Y}} &= \frac{\partial}{\partial \dot{Y}} \arctan\left(\frac{Y-Y_i}{X-X_i}\right) = 0
+\end{align*}
+
+\subsection{Section 2}
+% Content for Section 2
+
+\subsection{Section 3}
+% Content for Section 3
+
+\end{document}
+
