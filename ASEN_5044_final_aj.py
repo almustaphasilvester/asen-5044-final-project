@@ -28,10 +28,10 @@ class tracking_stations:
     def Yidot(self, t, i):
         return RE*omegaE*np.cos(omegaE * t + self.theta0(i))
 
-def nominal_orbit(t, T):
+def nominal_orbit(t):
     max_vel = r0*np.sqrt(mu/(r0**3))
 
-    theta = (t/T)*2*np.pi
+    theta = (t/T_tot)*2*np.pi
     x = r0*np.cos(theta)
     xdot = -max_vel*np.sin(theta)
     y = r0*np.sin(theta)
@@ -39,9 +39,9 @@ def nominal_orbit(t, T):
 
     return x, xdot, y, ydot
 
-def nominal_measurements(t, T, i):
+def nominal_measurements(t, i):
     # nominal orbit
-    X, Xdot, Y, Ydot = nominal_orbit(t, T)
+    X, Xdot, Y, Ydot = nominal_orbit(t)
 
     # tracking station data
     Xi = tracking_station_data.Xi(t, i)
@@ -52,9 +52,24 @@ def nominal_measurements(t, T, i):
     # nominal measurements
     rho    = np.sqrt((X-Xi)**2 + (Y-Yi)**2)
     rhodot = ((X-Xi)*(Xdot-Xidot) + (Y-Yi)*(Ydot-Yidot))/rho
-    phi    = np.arctan((Y-Yi)/(X-Xi))
+    phi    = np.arctan2((Y-Yi),(X-Xi))
 
     return rho, rhodot, phi
+
+def dyn_sys(state, t):
+        """
+        define dynamical system with given equations
+        note: NO CTRL ACCEL OR DISTURBANCES
+        """
+        x, v_x, y, v_y = state
+    
+        # Compute the derivatives
+        dx_dt = v_x
+        ddx_dt = (-mu * x) / (x**2 + y**2)**(3/2)
+        dy_dt = v_y
+        ddy_dt = (-mu * y) / (x**2 + y**2)**(3/2)
+        
+        return [dx_dt, ddx_dt, dy_dt, ddy_dt]
 
 def dt_linearization_states(x_nom, dT):
     """
@@ -123,7 +138,7 @@ def dt_linearized_state_sim(F,G,x_nom,dT,T):
 
     # intial conditions - perturbation
     # (no process noise, measurement noise, or control input perturbations)
-    dx = np.array([[0],[0],[0],[0]])
+    dx = np.array([[0],[7.5*(10**-15)],[0],[-0.021]])
     du = np.zeros((2,1))
 
     # # initial conditions - state, i.e. nominal point
@@ -135,7 +150,7 @@ def dt_linearized_state_sim(F,G,x_nom,dT,T):
         dx = F@dx + G@du
 
         # calculate new nominal orbit
-        x, xdot, y, ydot = nominal_orbit(t, T_tot)
+        x, xdot, y, ydot = nominal_orbit(t)
         x_nom_new = [[x],[xdot],[y],[ydot]]
 
         x_tot = x_nom_new + dx
@@ -163,21 +178,6 @@ def dt_linearized_state_sim(F,G,x_nom,dT,T):
     plt.tight_layout()
 
     # validate using scipy.integrate.odeint
-    def dyn_sys(state, t):
-        """
-        define dynamical system with given equations
-        note: NO CTRL ACCEL OR DISTURBANCES
-        """
-        x, v_x, y, v_y = state
-    
-        # Compute the derivatives
-        dx_dt = v_x
-        ddx_dt = (-mu * x) / (x**2 + y**2)**(3/2)
-        dy_dt = v_y
-        ddy_dt = (-mu * y) / (x**2 + y**2)**(3/2)
-        
-        return [dx_dt, ddx_dt, dy_dt, ddy_dt]
-    
     t_eval = np.linspace(0, T, int(T/10))
     soln = odeint(dyn_sys, np.asarray(x_nom).flatten(), t_eval)
 
@@ -239,15 +239,28 @@ def dt_linearized_state_sim(F,G,x_nom,dT,T):
     plt.show()
     plt.close()
 
-def dt_linearized_measurements_sim(H,M,x_nom,dT,T):
+def dt_linearized_measurements_sim(F,G,H,M,x_nom,dT,T):
     """
     Simulate linearized DT measurement model near nominal point
     Validate against numerical integration routine (i.e. odeint)
     """
-    colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b', '#e377c2', '#f4a261', '#17becf', '#ff9896', '#c5b0d5']
+    colors = [
+        '#E57373',  # Red
+        '#64B5F6',  # Blue
+        '#81C784',  # Green
+        '#FFB74D',  # Orange
+        '#BA68C8',  # Purple
+        '#F06292',  # Pink
+        '#FFF176',  # Yellow
+        '#4DD0E1',  # Cyan
+        '#8D6E63',  # Brown
+        '#4DB6AC',  # Teal
+        '#5C6BC0',  # Indigo
+        '#D4E157'   # Lime
+        ]
 
     fig, ax = plt.subplots(4,1,sharex=True)
-    fig.suptitle('Simulated Linearized DT Dynamics')
+    fig.suptitle('Simulated Linearized DT Measurements')
     ax[0].set_title('rho_i')
     ax[0].set_xlabel('Time (s)')
     ax[0].set_ylabel('Range (km)')
@@ -263,39 +276,144 @@ def dt_linearized_measurements_sim(H,M,x_nom,dT,T):
 
     # intial conditions - perturbation
     # (no process noise, measurement noise, or control input perturbations)
-    dx = np.array([[0],[-0.057],[0],[-0.057]])
+    dx = np.array([[0],[0],[0],[0]])
     du = np.zeros((2,1))
 
-    # dictionary for visible stations plot
-    visible_stations = {}
+    # simulate linearized DT measurements
     for i in range(12):
-        # # initial conditions - measurement, i.e. nominal point
-        rho, rhodot, phi = nominal_measurements(0, T, i)
+        vis_list = []
+
+        # initial conditions - measurement, i.e. nominal point
+        rho, rhodot, phi = nominal_measurements(0, i)
         y_nom_new = np.array([[rho],[rhodot],[phi]])
 
+        # visibility, starting at t=0
+        theta    = np.arctan2(tracking_station_data.Yi(0,i),tracking_station_data.Xi(0,i))
+        el_L_lim = (-0.5*np.pi)+theta
+        el_H_lim = (0.5*np.pi)+theta
+
+        if (phi >= el_L_lim) and (phi <= el_H_lim):
+            y_tot_list = y_nom_new
+            vis_list.append(i+1)
+        else:
+            y_tot_list = np.array([[np.nan],[np.nan],[np.nan]])
+            vis_list.append(np.nan)
+
         # simulate linearized DT dynamics
-        y_tot = y_nom_new
-        print(H[i])
         for t in range(dT,int(T),dT):
+            # visibility, at time t
+            theta    = np.arctan2(tracking_station_data.Yi(t,i),tracking_station_data.Xi(t,i))
+            el_L_lim = (-0.5*np.pi)+theta
+            el_H_lim = (0.5*np.pi)+theta
+
             dy = (H[i])@dx + M@du
 
             # calculate new nominal measurements
-            rho, rhodot, phi = nominal_measurements(0, T, i)
+            rho, rhodot, phi = nominal_measurements(t, i)
             y_nom_new = np.array([[rho],[rhodot],[phi]])
 
-            # FOR NEXT TIMESTEP - calculate H,M matrices
-            H,M = dt_linearization_measurements(x_nom, t)
+            if (phi >= el_L_lim) and (phi <= el_H_lim):
+                y_tot = y_nom_new + dy
+                vis_list.append(i+1)
+            else:
+                y_tot = np.array([[np.nan],[np.nan],[np.nan]])
+                vis_list.append(np.nan)
 
-            rho, rhodot, phi = nominal_measurements(0, T, i)
-            y_nom_new = np.array([[rho],[rhodot],[phi]])
-            y_tot = np.concatenate((y_tot, np.array(y_nom_new)), axis=1)
+            y_tot_list = np.concatenate((y_tot_list, np.array(y_tot)), axis=1)
 
-            timesteps = np.arange(0,int(T),dT)
-            ax[0].plot(timesteps, np.squeeze(np.asarray(y_tot[0])), color=colors[i])
-            ax[1].plot(timesteps, np.squeeze(np.asarray(y_tot[1])), color=colors[i])
-            ax[2].plot(timesteps, np.squeeze(np.asarray(y_tot[2])), color=colors[i])
+            dx = F@dx + G@du
+
+        timesteps = np.arange(0,int(T),dT)
+        ax[0].plot(timesteps, np.squeeze(np.asarray(y_tot_list[0])), color=colors[i])
+        ax[1].plot(timesteps, np.squeeze(np.asarray(y_tot_list[1])), color=colors[i])
+        ax[2].plot(timesteps, np.squeeze(np.asarray(y_tot_list[2])), color=colors[i])
+        ax[3].plot(timesteps, vis_list, color=colors[i])
     
     plt.tight_layout()
+
+    # validate using scipy.integrate.odeint
+    def dyn_measurements(state, station_state):
+        """
+        define dynamical system with given equations
+        note: NO CTRL ACCEL OR DISTURBANCES
+        """
+        x, v_x, y, v_y = state
+        xi, v_xi, yi, v_yi = station_state
+
+        # Compute the range (rho)
+        rho = np.sqrt((x - xi)**2 + (y - yi)**2)
+        
+        # Compute the radial velocity (dot(rho))
+        rho_dot = ((x - xi) * (v_x - v_xi) + (y - yi) * (v_y - v_yi)) / rho
+        
+        # Compute the elevation angle (phi)
+        phi = np.arctan2(y - yi, x - xi)
+        
+        return rho, rho_dot, phi
+
+    # validate using scipy.integrate.odeint
+    t_eval = np.linspace(0, T, int(T/10))
+    soln = odeint(dyn_sys, np.asarray(x_nom).flatten(), t_eval)
+
+    fig, ax = plt.subplots(4,1,sharex=True)
+    fig.suptitle('Full Nonlinear Measurements Simulation (using scipy.odeint)')
+    ax[0].set_title('rho_i')
+    ax[0].set_xlabel('Time (s)')
+    ax[0].set_ylabel('Range (km)')
+    ax[1].set_title('rho_dot_i')
+    ax[1].set_xlabel('Time (s)')
+    ax[1].set_ylabel('Range Rate (km/s)')
+    ax[2].set_title('phi_i')
+    ax[2].set_xlabel('Time (s)')
+    ax[2].set_ylabel('Elevation (rad)')
+    ax[3].set_title('Visible Stations')
+    ax[3].set_xlabel('Time (s)')
+    ax[3].set_ylabel('Station ID')
+    
+    for i in range(12):
+        vis_list = []
+        t_idx = 0
+        for t in range(0,int(T),dT):
+            # tracking station data
+            Xi = tracking_station_data.Xi(t, i)
+            Yi = tracking_station_data.Yi(t, i)
+            Xidot = tracking_station_data.Xidot(t, i)
+            Yidot = tracking_station_data.Yidot(t, i)
+            station_state = [Xi, Xidot, Yi, Yidot]
+
+            # visibility, at time t
+            theta    = np.arctan2(Yi,Xi)
+            el_L_lim = (-0.5*np.pi)+theta
+            el_H_lim = (0.5*np.pi)+theta
+
+            state = soln[t_idx, :]
+            rho, rho_dot, phi = dyn_measurements(state, station_state)
+
+            if (phi >= el_L_lim) and (phi <= el_H_lim):
+                y = np.array([[rho],[rho_dot],[phi]])
+                vis_list.append(i+1)
+            else:
+                y = np.array([[np.nan],[np.nan],[np.nan]])
+                vis_list.append(np.nan)
+
+            if t == 0:
+                y_soln = y
+            else:
+                y_soln = np.concatenate((y_soln, y), axis=1)
+
+            t_idx += 1
+
+        # Plot results
+        timesteps = np.arange(0,int(T),dT)
+        ax[0].plot(timesteps, np.squeeze(np.asarray(y_soln[0])), color=colors[i])
+        ax[1].plot(timesteps, np.squeeze(np.asarray(y_soln[1])), color=colors[i])
+        ax[2].plot(timesteps, np.squeeze(np.asarray(y_soln[2])), color=colors[i])
+        ax[3].plot(timesteps, vis_list, color=colors[i])
+
+    plt.tight_layout()
+
+    # residuals
+
     plt.show()
     plt.close()
 
@@ -324,5 +442,5 @@ if __name__ == "__main__":
     H, M = dt_linearization_measurements(x_nom, 0)
 
     # simulate the linearize DT dynamics and measurement models
-    dt_linearized_state_sim(F,G,x_nom,dT,T)
-    #dt_linearized_measurements_sim(H,M,x_nom,dT,T)
+    #dt_linearized_state_sim(F,G,x_nom,dT,T)
+    dt_linearized_measurements_sim(F,G,H,M,x_nom,dT,T)
