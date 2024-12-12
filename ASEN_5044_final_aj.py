@@ -2,8 +2,11 @@ from matplotlib import pyplot as plt
 import numpy as np
 import os, sys
 import pandas as pd
-from scipy.linalg import expm
+from scipy.linalg import expm, block_diag
 from scipy.integrate import odeint, solve_ivp
+from scipy.io import loadmat
+
+# NOMINAL/NONLINEAR MODELS ----------------------------------------------------------------
 
 class tracking_stations:
     """
@@ -91,6 +94,8 @@ def dyn_measurements(state, station_state):
         
         return rho, rho_dot, phi
 
+# PART 1 ----------------------------------------------------------------------------------
+
 def dt_linearization_states(x_nom, dT):
     """
     Linearize CT system about specified equilibrium/nominal operating point and find correspond DT linearized model matrices
@@ -161,7 +166,6 @@ def dt_linearized_state_sim(x0,dT,T):
 
     # intial conditions - perturbation
     # (no process noise, measurement noise, or control input perturbations)
-
     dx = np.array([[0],[0.075],[0],[-0.021]])
     du = np.zeros((2,1))
 
@@ -422,8 +426,194 @@ def dt_linearized_measurements_sim(x0,dT,T):
     plt.show()
     plt.close()
 
-def LKF():
-    pass
+# PART 2 ----------------------------------------------------------------------------------
+
+def LKF(x0, dT, T, Qtrue, Rtrue, ydata):
+    """
+    Implement and tune a linearized KF using the specified nominal state trajectory
+    """
+    
+    def eulerized_dt_jacobians(x_nom, dT, t):
+        # nominal point
+        X_nom    = x_nom[0][0]
+        Xdot_nom = x_nom[1][0]
+        Y_nom    = x_nom[2][0]
+        Ydot_nom = x_nom[3][0]
+
+        # CT nonlinear model Jacobians - evaluated at nominal point
+        A_nom = np.array([[0,1,0,0]\
+                ,[(-mu*(Y_nom**2 - 2*(X_nom**2)))/((X_nom**2 + Y_nom**2)**2.5), 0, (3*mu*X_nom*Y_nom)/((X_nom**2 + Y_nom**2)**2.5), 0]\
+                ,[0,0,0,1]\
+                ,[3*mu*X_nom*Y_nom/((X_nom**2 + Y_nom**2)**2.5), 0, (-mu*(X_nom**2 - 2*(Y_nom**2)))/((X_nom**2 + Y_nom**2)**2.5), 0]])
+        B_nom = np.array([[0, 0]\
+                ,[1,0]\
+                ,[0,0]\
+                ,[0,1]])
+        C_nom = {}
+        for i in range(12):
+            Xi_nom = tracking_station_data.Xi(t, i)
+            Yi_nom = tracking_station_data.Yi(t, i)
+            Xidot_nom = tracking_station_data.Xidot(t, i)
+            Yidot_nom = tracking_station_data.Yidot(t, i)
+            C_nom[i] = np.array([[(X_nom-Xi_nom)/np.sqrt((X_nom-Xi_nom)**2 + (Y_nom-Yi_nom)**2), 0, (Y_nom-Yi_nom)/np.sqrt((X_nom-Xi_nom)**2 + (Y_nom-Yi_nom)**2), 0],\
+                        [((Y_nom-Yi_nom)*((Xdot_nom-Xidot_nom)*(Y_nom-Yi_nom) - (Ydot_nom - Yidot_nom)*(X_nom-Xi_nom)))/(((X_nom-Xi_nom)**2 + (Y_nom-Yi_nom)**2)**1.5),\
+                            (X_nom-Xi_nom)/np.sqrt((X_nom-Xi_nom)**2 + (Y_nom-Yi_nom)**2),\
+                            ((X_nom-Xi_nom)*((Ydot_nom-Yidot_nom)*(X_nom-Xi_nom) - (Xdot_nom - Xidot_nom)*(Y_nom-Yi_nom)))/(((X_nom-Xi_nom)**2 + (Y_nom-Yi_nom)**2)**1.5),\
+                            (Y_nom-Yi_nom)/np.sqrt((X_nom-Xi_nom)**2 + (Y_nom-Yi_nom)**2),],\
+                        [-(Y_nom-Yi_nom)/((X_nom-Xi_nom)**2 + (Y_nom-Yi_nom)**2), 0, (X_nom-Xi_nom)/((X_nom-Xi_nom)**2 + (Y_nom-Yi_nom)**2), 0]])
+        Gamma_nom = np.array([[0 ,0]\
+                            ,[1, 0]\
+                            ,[0, 0]\
+                            ,[0, 1]])
+        
+        F_tilde = np.identity(np.shape(A_nom)[0]) + dT*A_nom
+        G_tilde = dT*B_nom
+        Omega_tilde = dT*Gamma_nom
+        H_tilde = C_nom
+
+        return F_tilde, G_tilde, Omega_tilde, H_tilde
+
+    # initialize at t=0
+    x_hat_plus = np.array(x0)
+    dx_hat_plus = np.array([[0],[0.075],[0],[-0.021]])
+    du = np.zeros((2,1))
+
+    F_tilde, G_tilde, Omega_tilde, H_tilde_all = eulerized_dt_jacobians(x0, dT, 0)
+    
+    # LKF TUNING
+    P_plus     = np.diag([50,50,50,50])
+    Q_LKF      = np.diag([10**-15,10**-15])
+    #Q_LKF = Qtrue    # hardcode to Qtrue for now?
+    
+    x_hat_plus_tot = x_hat_plus + dx_hat_plus       # ie nominal + perturb
+    P_list         = [P_plus]
+
+    # nominal state
+    t_eval = np.linspace(0, T, int(T/10))
+    soln = odeint(dyn_sys, np.asarray(x0).flatten(), t_eval)
+
+    t_idx = 1
+    for t in range(dT,T,dT):
+        # TIME UPDATE/PREDICTION STEP FOR TIME k+1
+        dx_hat_minus = F_tilde@dx_hat_plus + G_tilde@du
+        P_minus      = (F_tilde@P_plus@(F_tilde.T)) + (Omega_tilde@Q_LKF@(Omega_tilde.T))
+
+        # MEASUREMENT UPDATE/CORRECTION STEP FOR TIME k+1
+        # actual received sensor measurement
+        y_full_vect = ydata[t_idx]
+        if y_full_vect.size != 0:
+            visible_stations = y_full_vect[3,:]
+            H_tilde = np.array([])
+            y       = np.array([])
+            y_star  = np.array([])
+            R_all   = np.array([])
+            idx     = 0
+            for id in visible_stations:
+                id -= 1
+                # stack measurement vectors
+                y_id = y_full_vect[0:3,idx]
+                y_id = np.array([[y_id[0]],[y_id[1]],[y_id[2]]])
+                if y.size == 0:
+                    y = y_id
+                else:
+                    y = np.concatenate((y, np.array(y_id)), axis=0)
+
+                # stack H matrices
+                H_tilde_id = H_tilde_all[id]
+                if H_tilde.size == 0:
+                    H_tilde = np.array(H_tilde_id)
+                else:
+                    H_tilde = np.concatenate((H_tilde, np.array(H_tilde_id)), axis=0)
+
+                # stack nominal measurements
+                Xi = tracking_station_data.Xi(t, id)
+                Yi = tracking_station_data.Yi(t, id)
+                Xidot = tracking_station_data.Xidot(t, id)
+                Yidot = tracking_station_data.Yidot(t, id)
+                station_state = [Xi, Xidot, Yi, Yidot]
+                # nominal sensor measurement at time k+1
+                state = soln[t_idx, :]
+                rho, rho_dot, phi = dyn_measurements(state, station_state)
+                y_star_id = np.array([[rho],[rho_dot],[phi]])
+                if y_star.size == 0:
+                    y_star = np.array(y_star_id)
+                else:
+                    y_star = np.concatenate((y_star, np.array(y_star_id)), axis=0)
+                    
+
+                if R_all.size == 0:
+                    R_all = Rtrue
+                else:
+                    R_all = block_diag(R_all, Rtrue)
+
+                idx += 1
+
+        # nominal sensor measurement at time k+1
+        dy = y - y_star
+
+        # Kalman Gain
+        K = P_minus@(H_tilde.T)@(np.linalg.inv((H_tilde@P_minus@(H_tilde.T) + R_all)))
+
+        # Covariance Matrix
+        P_plus = (np.identity(np.shape(P_minus)[0]) - (K@H_tilde))@P_minus
+
+        # state perturbation estimate
+        dx_hat_plus = dx_hat_minus + K@(dy - (H_tilde@dx_hat_minus))
+
+        # ADD TO NOMINAL STATE ESTIMATE
+        # calculate nominal orbit at time k+1
+        x, xdot, y, ydot = nominal_orbit(t)
+        x_nom = [[x],[xdot],[y],[ydot]]
+        x_hat_plus = x_nom + dx_hat_plus
+
+        x_hat_plus_tot = np.concatenate((x_hat_plus_tot, np.array(x_hat_plus)), axis=1)
+        P_list.append(P_plus)
+
+        # FOR NEXT TIMESTEP, calculate new F_tilde, G_tilde, Omega_tilde, H_tilde_all
+        F_tilde, G_tilde, Omega_tilde, H_tilde_all = eulerized_dt_jacobians(x_nom, dT, t)
+        
+        t_idx += 1
+
+    # PLOT
+    timesteps = np.arange(0,int(T),dT)
+    fig, ax = plt.subplots(4,1,sharex=True)
+    fig.suptitle('Linearized Kalman Filter')
+    ax[0].plot(timesteps, np.squeeze(np.asarray(x_hat_plus_tot[0])), color='b')
+    ax[0].set_title('X')
+    ax[0].set_xlabel('Time (s)')
+    ax[0].set_ylabel('Position (km)')
+    ax[1].plot(timesteps, np.squeeze(np.asarray(x_hat_plus_tot[1])), color='b')
+    ax[1].set_title('X_dot')
+    ax[1].set_xlabel('Time (s)')
+    ax[1].set_ylabel('Velocity (km/s)')
+    ax[2].plot(timesteps, np.squeeze(np.asarray(x_hat_plus_tot[2])), color='b')
+    ax[2].set_title('Y')
+    ax[2].set_xlabel('Time (s)')
+    ax[2].set_ylabel('Position (km)')
+    ax[3].plot(timesteps, np.squeeze(np.asarray(x_hat_plus_tot[3])), color='b')
+    ax[3].set_title('Y_dot')
+    ax[3].set_xlabel('Time (s)')
+    ax[3].set_ylabel('Velocity (km/s)')
+
+    ax[0].set_ylim([-7500,7500])
+    ax[1].set_ylim([-9,9])
+    ax[2].set_ylim([-7500,7500])
+    ax[3].set_ylim([-9,9])
+
+    # plot confidence bounds
+    for i in range(4):
+        upper_bounds    = [2*np.sqrt(array[i, i]) for array in P_list]  # Extract the diagonal element (i, i) at each timestep
+        lower_bounds    = [-2*np.sqrt(array[i, i]) for array in P_list]  # Extract the diagonal element (i, i) at each timestep
+        upper_bounds = upper_bounds + x_hat_plus_tot[i]
+        lower_bounds = lower_bounds + x_hat_plus_tot[i]
+        ax[i].plot(timesteps, upper_bounds, 'r-')
+        ax[i].plot(timesteps, lower_bounds, 'r-')
+
+    plt.tight_layout()
+    plt.show()
+    plt.close()
+
+# MAIN =====================================================================================
 
 if __name__ == "__main__":
     # given parameters
@@ -447,8 +637,8 @@ if __name__ == "__main__":
     tracking_station_data = tracking_stations(RE, omegaE)
 
     # simulate the linearize DT dynamics and measurement models
-    dt_linearized_state_sim(x0,dT,T)
-    dt_linearized_measurements_sim(x0,dT,T)
+    #dt_linearized_state_sim(x0,dT,T)
+    #dt_linearized_measurements_sim(x0,dT,T)
 
     # linearized kalman filter (LKF)
     # input files
@@ -457,6 +647,6 @@ if __name__ == "__main__":
     Rtrue = np.genfromtxt(os.path.join(input_files_dir, 'Rtrue.csv'), delimiter=',')     # measurement noise covar
     tvec  =(pd.read_csv(os.path.join(input_files_dir, 'tvec.csv'), header=None)).values.tolist()      # time vector
     measLabels = (pd.read_csv(os.path.join(input_files_dir, 'measLabels.csv'), header=None)).values.tolist()    # labels for measurements dataframe
-    ydata = pd.read_csv(os.path.join(input_files_dir, 'ydata.csv'), header=None, usecols=list(range(int(T/dT) + 1)), names=tvec[0])         # measurements
-    ydata['index'] = measLabels[0]
-    ydata = ydata.set_index('index', drop=True)
+    ydata = loadmat(os.path.join(input_files_dir,'orbitdeterm_finalproj_KFdata.mat'))['ydata'][0]
+
+    LKF(x0, dT, T, Qtrue, Rtrue, ydata)
