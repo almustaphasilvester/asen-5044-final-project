@@ -5,6 +5,7 @@ import pandas as pd
 from scipy.linalg import expm, block_diag
 from scipy.integrate import odeint, solve_ivp
 from scipy.io import loadmat
+from scipy.stats import multivariate_normal as mvn
 
 # NOMINAL/NONLINEAR MODELS ----------------------------------------------------------------
 
@@ -60,39 +61,55 @@ def nominal_measurements(t, i):
 
     return rho, rhodot, phi
 
-def dyn_sys(state, t):
-        """
-        define dynamical system with given equations
-        note: NO CTRL ACCEL OR DISTURBANCES
-        """
-        x, v_x, y, v_y = state
+def dyn_sys(state, t, Qtrue=np.array([])):
+    """
+    define dynamical system with given equations
+    """
+    if Qtrue.size != 0:
+        wtilde = np.random.multivariate_normal([0,0], Qtrue)
+        w1 = float(wtilde[0])
+        w2 = float(wtilde[1])
+    else:
+        w1 = 0
+        w2 = 0
+
+    x, v_x, y, v_y = state
+
+    # Compute the derivatives
+    dx_dt = v_x
+    ddx_dt = (-mu * x) / (x**2 + y**2)**(3/2) + w1
+    dy_dt = v_y
+    ddy_dt = (-mu * y) / (x**2 + y**2)**(3/2) + w2
     
-        # Compute the derivatives
-        dx_dt = v_x
-        ddx_dt = (-mu * x) / (x**2 + y**2)**(3/2)
-        dy_dt = v_y
-        ddy_dt = (-mu * y) / (x**2 + y**2)**(3/2)
-        
-        return [dx_dt, ddx_dt, dy_dt, ddy_dt]
+    return [dx_dt, ddx_dt, dy_dt, ddy_dt]
 
-def dyn_measurements(state, station_state):
-        """
-        define dynamical system with given equations
-        note: NO CTRL ACCEL OR DISTURBANCES
-        """
-        x, v_x, y, v_y = state
-        xi, v_xi, yi, v_yi = station_state
+def dyn_measurements(state, station_state, Rtrue=np.array([])):
+    """
+    define dynamical system with given equations
+    """
+    if Rtrue.size != 0:
+        vtilde = np.random.multivariate_normal([0,0,0], Rtrue)
+        v1 = float(vtilde[0])
+        v2 = float(vtilde[1])
+        v3 = float(vtilde[2])
+    else:
+        v1 = 0
+        v2 = 0
+        v3 = 0
 
-        # Compute the range (rho)
-        rho = np.sqrt((x - xi)**2 + (y - yi)**2)
-        
-        # Compute the radial velocity (dot(rho))
-        rho_dot = (((x - xi) * (v_x - v_xi)) + ((y - yi) * (v_y - v_yi))) / rho
-        
-        # Compute the elevation angle (phi)
-        phi = np.arctan2(y - yi, x - xi)
-        
-        return rho, rho_dot, phi
+    x, v_x, y, v_y = state
+    xi, v_xi, yi, v_yi = station_state
+
+    # Compute the range (rho)
+    rho = (np.sqrt((x - xi)**2 + (y - yi)**2)) + v1
+    
+    # Compute the radial velocity (dot(rho))
+    rho_dot = ((((x - xi) * (v_x - v_xi)) + ((y - yi) * (v_y - v_yi))) / rho) + v2
+    
+    # Compute the elevation angle (phi)
+    phi = (np.arctan2(y - yi, x - xi)) + v3
+    
+    return rho, rho_dot, phi
 
 # PART 1 ----------------------------------------------------------------------------------
 
@@ -155,7 +172,7 @@ def dt_linearization_measurements(x_nom, t):
 
     return H, M
 
-def dt_linearized_state_sim(x0,dT,T):
+def dt_linearized_state_sim(x0, dT, T):
     """
     Simulate linearized DT dynamics model near nominal point
     Validate against numerical integration routine (i.e. odeint)
@@ -174,6 +191,7 @@ def dt_linearized_state_sim(x0,dT,T):
 
     # # simulate linearized DT dynamics
     x_tot_list = x_nom
+    dx_tot_list = dx
     for t in range(dT,int(T),dT):
         # calculate dx at time k, using dx at k-1
         dx = F@dx + G@du
@@ -184,6 +202,7 @@ def dt_linearized_state_sim(x0,dT,T):
 
         x_tot = x_nom + dx
         x_tot_list = np.concatenate((x_tot_list, np.array(x_tot)), axis=1)
+        dx_tot_list = np.concatenate((dx_tot_list, np.array(dx)), axis=1)
 
         # FOR NEXT TIMESTEP, calculate F and G 
         F, G = dt_linearization_states(x_nom, dT)
@@ -220,7 +239,6 @@ def dt_linearized_state_sim(x0,dT,T):
     v_y_vals = soln[:, 3]
 
     # Plot the results
-    timesteps = np.arange(0,int(T),1)
     fig, ax = plt.subplots(4,1,sharex=True)
     fig.suptitle('Full Nonlinear Dynamics Simulation (using scipy.odeint)')
     ax[0].plot(t_eval, x_vals, color='r')
@@ -241,29 +259,22 @@ def dt_linearized_state_sim(x0,dT,T):
     ax[3].set_ylabel('Velocity (km/s)')
     plt.tight_layout()
 
-    # residuals
-    x_resid = np.squeeze(np.asarray(x_tot_list[0] - soln[:, 0]));
-    xdot_resid = np.squeeze(np.asarray(x_tot_list[0] - soln[:, 1]));
-    y_resid = np.squeeze(np.asarray(x_tot_list[0] - soln[:, 2]));
-    ydot_resid = np.squeeze(np.asarray(x_tot_list[0] - soln[:, 3]));
-
-    # Plot the residuals
-    timesteps = np.arange(0,int(T),1)
+    # Plot the state perturbations
     fig, ax = plt.subplots(4,1,sharex=True)
-    fig.suptitle('Residuals (Linear DT Simulation vs Nonlinear Dynamics Simulation)')
-    ax[0].plot(t_eval, x_resid)
+    fig.suptitle('Linearized Approx. Perturbations vs. Time')
+    ax[0].plot(t_eval, np.squeeze(np.asarray(dx_tot_list[0])))
     ax[0].set_title('X')
     ax[0].set_xlabel('Time (s)')
     ax[0].set_ylabel('Position (km)')
-    ax[1].plot(t_eval, xdot_resid)
+    ax[1].plot(t_eval, np.squeeze(np.asarray(dx_tot_list[1])))
     ax[1].set_title('X_dot')
     ax[1].set_xlabel('Time (s)')
     ax[1].set_ylabel('Velocity (km/s)')
-    ax[2].plot(t_eval, y_resid)
+    ax[2].plot(t_eval, np.squeeze(np.asarray(dx_tot_list[2])))
     ax[2].set_title('Y')
     ax[2].set_xlabel('Time (s)')
     ax[2].set_ylabel('Position (km)')
-    ax[3].plot(t_eval, ydot_resid)
+    ax[3].plot(t_eval, np.squeeze(np.asarray(dx_tot_list[3])))
     ax[3].set_title('Y_dot')
     ax[3].set_xlabel('Time (s)')
     ax[3].set_ylabel('Velocity (km/s)')
@@ -271,7 +282,7 @@ def dt_linearized_state_sim(x0,dT,T):
     plt.show()
     plt.close()
 
-def dt_linearized_measurements_sim(x0,dT,T):
+def dt_linearized_measurements_sim(x0, dT, T):
     """
     Simulate linearized DT measurement model near nominal point
     Validate against numerical integration routine (i.e. odeint)
@@ -427,6 +438,40 @@ def dt_linearized_measurements_sim(x0,dT,T):
     plt.close()
 
 # PART 2 ----------------------------------------------------------------------------------
+def monte_carlo_tmt(x0,Qtrue,T):
+    # HARD-CODED FOR NOW FOR REPRODUCIBILITY
+    np.random.seed(100)
+
+    # ground truth states
+    t_eval = np.linspace(0, T, int(T/10))
+    state_soln = odeint(dyn_sys, np.asarray(x0).flatten(), t_eval, args=(Qtrue,))
+
+    # sanity check plots
+    # Plot the results
+    fig, ax = plt.subplots(4,1,sharex=True)
+    fig.suptitle('Monte Carlo Sim (using scipy.odeint)')
+    ax[0].plot(t_eval, state_soln[:, 0])
+    ax[0].set_title('X')
+    ax[0].set_xlabel('Time (s)')
+    ax[0].set_ylabel('Position (km)')
+    ax[1].plot(t_eval, state_soln[:, 1])
+    ax[1].set_title('X_dot')
+    ax[1].set_xlabel('Time (s)')
+    ax[1].set_ylabel('Velocity (km/s)')
+    ax[2].plot(t_eval, state_soln[:, 2])
+    ax[2].set_title('Y')
+    ax[2].set_xlabel('Time (s)')
+    ax[2].set_ylabel('Position (km)')
+    ax[3].plot(t_eval, state_soln[:, 3])
+    ax[3].set_title('Y_dot')
+    ax[3].set_xlabel('Time (s)')
+    ax[3].set_ylabel('Velocity (km/s)')
+    plt.tight_layout()
+
+    plt.show()
+    plt.close()
+
+    return state_soln
 
 def LKF(x0, dT, T, Qtrue, Rtrue, ydata):
     """
@@ -482,15 +527,14 @@ def LKF(x0, dT, T, Qtrue, Rtrue, ydata):
     
     # LKF TUNING
     P_plus     = np.diag([50,50,50,50])
-    Q_LKF      = np.diag([10**-15,10**-15])
-    #Q_LKF = Qtrue    # hardcode to Qtrue for now?
+    Q_LKF = Qtrue    # hardcode to Qtrue for now?
     
-    x_hat_plus_tot = x_hat_plus + dx_hat_plus       # ie nominal + perturb
-    P_list         = [P_plus]
+    x_hat_plus_tot  = x_hat_plus + dx_hat_plus       # ie nominal + perturb
+    dx_hat_plus_tot = dx_hat_plus
+    P_list          = [P_plus]
 
-    # nominal state
-    t_eval = np.linspace(0, T, int(T/10))
-    soln = odeint(dyn_sys, np.asarray(x0).flatten(), t_eval)
+    # ground truth values
+    xstar = monte_carlo_tmt(x0,Qtrue,T)
 
     t_idx = 1
     for t in range(dT,T,dT):
@@ -531,9 +575,10 @@ def LKF(x0, dT, T, Qtrue, Rtrue, ydata):
                 Xidot = tracking_station_data.Xidot(t, id)
                 Yidot = tracking_station_data.Yidot(t, id)
                 station_state = [Xi, Xidot, Yi, Yidot]
+                # *********** NEED TO DO GROUND TRUTH SIM HERE? ***********
                 # nominal sensor measurement at time k+1
-                state = soln[t_idx, :]
-                rho, rho_dot, phi = dyn_measurements(state, station_state)
+                state = xstar[t_idx, :]
+                rho, rho_dot, phi = dyn_measurements(state, station_state, Rtrue)
                 y_star_id = np.array([[rho],[rho_dot],[phi]])
                 if y_star.size == 0:
                     y_star = np.array(y_star_id)
@@ -566,7 +611,8 @@ def LKF(x0, dT, T, Qtrue, Rtrue, ydata):
         x_nom = [[x],[xdot],[y],[ydot]]
         x_hat_plus = x_nom + dx_hat_plus
 
-        x_hat_plus_tot = np.concatenate((x_hat_plus_tot, np.array(x_hat_plus)), axis=1)
+        x_hat_plus_tot  = np.concatenate((x_hat_plus_tot, np.array(x_hat_plus)), axis=1)
+        dx_hat_plus_tot = np.concatenate((dx_hat_plus_tot, np.array(dx_hat_plus)), axis=1)
         P_list.append(P_plus)
 
         # FOR NEXT TIMESTEP, calculate new F_tilde, G_tilde, Omega_tilde, H_tilde_all
@@ -574,7 +620,8 @@ def LKF(x0, dT, T, Qtrue, Rtrue, ydata):
         
         t_idx += 1
 
-    # PLOT
+    # PLOTS
+    # LKF states
     timesteps = np.arange(0,int(T),dT)
     fig, ax = plt.subplots(4,1,sharex=True)
     fig.suptitle('Linearized Kalman Filter')
@@ -610,6 +657,44 @@ def LKF(x0, dT, T, Qtrue, Rtrue, ydata):
         ax[i].plot(timesteps, lower_bounds, 'r-')
 
     plt.tight_layout()
+
+    # Linearized KF State Estimation Errors
+    timesteps = np.arange(0,int(T),dT)
+    fig, ax = plt.subplots(4,1,sharex=True)
+    fig.suptitle('Linearized KF State Perturbations')
+    ax[0].plot(timesteps, np.squeeze(np.asarray(dx_hat_plus_tot[0])), color='b')
+    ax[0].set_title('X')
+    ax[0].set_xlabel('Time (s)')
+    ax[0].set_ylabel('Position (km)')
+    ax[1].plot(timesteps, np.squeeze(np.asarray(dx_hat_plus_tot[1])), color='b')
+    ax[1].set_title('X_dot')
+    ax[1].set_xlabel('Time (s)')
+    ax[1].set_ylabel('Velocity (km/s)')
+    ax[2].plot(timesteps, np.squeeze(np.asarray(dx_hat_plus_tot[2])), color='b')
+    ax[2].set_title('Y')
+    ax[2].set_xlabel('Time (s)')
+    ax[2].set_ylabel('Position (km)')
+    ax[3].plot(timesteps, np.squeeze(np.asarray(dx_hat_plus_tot[3])), color='b')
+    ax[3].set_title('Y_dot')
+    ax[3].set_xlabel('Time (s)')
+    ax[3].set_ylabel('Velocity (km/s)')
+
+    # plot confidence bounds
+    for i in range(4):
+        upper_bounds    = [2*np.sqrt(array[i, i]) for array in P_list]  # Extract the diagonal element (i, i) at each timestep
+        lower_bounds    = [-2*np.sqrt(array[i, i]) for array in P_list]  # Extract the diagonal element (i, i) at each timestep
+        upper_bounds = upper_bounds
+        lower_bounds = lower_bounds
+        ax[i].plot(timesteps, upper_bounds, 'r-')
+        ax[i].plot(timesteps, lower_bounds, 'r-')
+
+    ax[0].set_ylim([-510,510])
+    ax[1].set_ylim([-0.75,0.75])
+    ax[2].set_ylim([-510,510])
+    ax[3].set_ylim([-0.75,0.75])
+
+    plt.tight_layout()
+
     plt.show()
     plt.close()
 
