@@ -230,13 +230,13 @@ def dt_linearized_state_sim(x0, dT, T):
 
     # validate using scipy.integrate.odeint
     t_eval = np.linspace(0, T, int(T/10))
-    soln = odeint(dyn_sys, np.asarray(x0).flatten(), t_eval)
+    soln = solve_ivp(lambda t, y: dyn_sys(y, t), [0, T], np.asarray(x0).flatten(), t_eval=t_eval, method='RK45')
 
     # Extract the results from the solution
-    x_vals   = soln[:, 0]
-    v_x_vals = soln[:, 1]
-    y_vals   = soln[:, 2]
-    v_y_vals = soln[:, 3]
+    x_vals   = soln.y[0]
+    v_x_vals = soln.y[1]
+    y_vals   = soln.y[2]
+    v_y_vals = soln.y[3]
 
     # Plot the results
     fig, ax = plt.subplots(4,1,sharex=True)
@@ -443,7 +443,7 @@ def monte_carlo_tmt(x0,Qtrue,T,plot=False):
     t_eval = np.linspace(0, T, int(T/10))
     # odeint isn't working with the noise for some reason ... i swapped to solve_ivp
     noisy_soln = solve_ivp(lambda t, y: dyn_sys(y, t, Qtrue), [0, T], np.asarray(x0).flatten(), t_eval=t_eval, method='RK45')
-    soln = odeint(dyn_sys, np.asarray(x0).flatten(), t_eval)
+    soln = solve_ivp(lambda t, y: dyn_sys(y, t), [0, T], np.asarray(x0).flatten(), t_eval=t_eval, method='RK45')
 
     # sanity check plots
     # Plot the results
@@ -451,22 +451,22 @@ def monte_carlo_tmt(x0,Qtrue,T,plot=False):
         fig, ax = plt.subplots(4,1,sharex=True)
         fig.suptitle('Monte Carlo Sim (using scipy.integrate.solve_ivp)')
         ax[0].plot(t_eval, noisy_soln.y[0], color='b')
-        ax[0].plot(t_eval, soln[:,0], color='r')
+        ax[0].plot(t_eval, soln.y[0], color='r')
         ax[0].set_title('X')
         ax[0].set_xlabel('Time (s)')
         ax[0].set_ylabel('Position (km)')
         ax[1].plot(t_eval, noisy_soln.y[1], color='b')
-        ax[1].plot(t_eval, soln[:,1], color='r')
+        ax[1].plot(t_eval, soln.y[1], color='r')
         ax[1].set_title('X_dot')
         ax[1].set_xlabel('Time (s)')
         ax[1].set_ylabel('Velocity (km/s)')
         ax[2].plot(t_eval, noisy_soln.y[2], color='b')
-        ax[2].plot(t_eval, soln[:,2], color='r')
+        ax[2].plot(t_eval, soln.y[2], color='r')
         ax[2].set_title('Y')
         ax[2].set_xlabel('Time (s)')
         ax[2].set_ylabel('Position (km)')
         ax[3].plot(t_eval, noisy_soln.y[3], color='b')
-        ax[3].plot(t_eval, soln[:,3], color='r')
+        ax[3].plot(t_eval, soln.y[3], color='r')
         ax[3].set_title('Y_dot')
         ax[3].set_xlabel('Time (s)')
         ax[3].set_ylabel('Velocity (km/s)')
@@ -537,18 +537,24 @@ def LKF(x0, dT, T, Qtrue, Rtrue, ydata):
     F_tilde, G_tilde, Omega_tilde, H_tilde_all = eulerized_dt_jacobians(x0, dT, 0)
     
     # LKF TUNING
-    P_plus     = np.diag([50,50,50,50])
-    Q_LKF = Qtrue    # hardcode to Qtrue for now?
+    P_plus     = np.diag([100,100,100,100])
+    Q_LKF = np.diag([1e-10,1e-10])    # hardcode to Qtrue for now?
     
-    x_hat_plus_tot  = x_hat_plus + dx_hat_plus       # ie nominal + perturb
-    dx_hat_plus_tot = dx_hat_plus
-    P_list          = [P_plus]
+    x_hat_plus_tot   = x_hat_plus + dx_hat_plus       # ie nominal + perturb
+    ystar_tot_list   = []
+    vis_station_list = []
+    P_list           = [P_plus]
+    t_list           = [0]
 
     # ground truth values
     xstar = monte_carlo_tmt(x0,Qtrue,T,False)
 
     t_idx = 1
     for t in range(dT,T,dT):
+        # calculate nominal orbit at time k+1
+        x, xdot, y, ydot = nominal_orbit(t)
+        x_nom = [[x],[xdot],[y],[ydot]]
+
         # TIME UPDATE/PREDICTION STEP FOR TIME k+1
         dx_hat_minus = F_tilde@dx_hat_plus + G_tilde@du
         P_minus      = (F_tilde@P_plus@(F_tilde.T)) + (Omega_tilde@Q_LKF@(Omega_tilde.T))
@@ -560,9 +566,10 @@ def LKF(x0, dT, T, Qtrue, Rtrue, ydata):
             visible_stations = y_full_vect[3,:]
             H_tilde = np.array([])
             y       = np.array([])
-            y_star  = np.array([])
+            ystar  = np.array([])
             R_all   = np.array([])
             idx     = 0
+            vis_station_list.append([visible_stations])
             for id in visible_stations:
                 id -= 1
                 # stack measurement vectors
@@ -589,11 +596,11 @@ def LKF(x0, dT, T, Qtrue, Rtrue, ydata):
                 # nominal sensor measurement at time k+1
                 state = [xstar.y[0][t_idx],xstar.y[1][t_idx],xstar.y[2][t_idx],xstar.y[3][t_idx]]
                 rho, rho_dot, phi = dyn_measurements(state, station_state, Rtrue)
-                y_star_id = np.array([[rho],[rho_dot],[phi]])
-                if y_star.size == 0:
-                    y_star = np.array(y_star_id)
+                ystar_id = np.array([[rho],[rho_dot],[phi]])
+                if ystar.size == 0:
+                    ystar = np.array(ystar_id)
                 else:
-                    y_star = np.concatenate((y_star, np.array(y_star_id)), axis=0)
+                    ystar = np.concatenate((ystar, np.array(ystar_id)), axis=0)
                     
                 if R_all.size == 0:
                     R_all = Rtrue
@@ -602,27 +609,28 @@ def LKF(x0, dT, T, Qtrue, Rtrue, ydata):
 
                 idx += 1
 
-        # nominal sensor measurement at time k+1
-        dy = y - y_star
+            # save noisy simulated measurements for plotting
+            ystar_tot_list.append([ystar])
 
-        # Kalman Gain
-        K = P_minus@(H_tilde.T)@(np.linalg.inv((H_tilde@P_minus@(H_tilde.T) + R_all)))
+            # nominal sensor measurement at time k+1
+            dy = y - ystar
 
-        # Covariance Matrix
-        P_plus = (np.identity(np.shape(P_minus)[0]) - (K@H_tilde))@P_minus
+            # Kalman Gain
+            K = P_minus@(H_tilde.T)@(np.linalg.inv((H_tilde@P_minus@(H_tilde.T) + R_all)))
 
-        # state perturbation estimate
-        dx_hat_plus = dx_hat_minus + K@(dy - (H_tilde@dx_hat_minus))
+            # Covariance Matrix
+            P_plus = (np.identity(np.shape(P_minus)[0]) - (K@H_tilde))@P_minus
 
-        # ADD TO NOMINAL STATE ESTIMATE
-        # calculate nominal orbit at time k+1
-        x, xdot, y, ydot = nominal_orbit(t)
-        x_nom = [[x],[xdot],[y],[ydot]]
-        x_hat_plus = x_nom + dx_hat_plus
+            # state perturbation estimate
+            dx_hat_plus = dx_hat_minus + K@(dy - (H_tilde@dx_hat_minus))
 
-        x_hat_plus_tot  = np.concatenate((x_hat_plus_tot, np.array(x_hat_plus)), axis=1)
-        dx_hat_plus_tot = np.concatenate((dx_hat_plus_tot, np.array(dx_hat_plus)), axis=1)
-        P_list.append(P_plus)
+            # ADD TO NOMINAL STATE ESTIMATE
+            x_hat_plus = x_nom + dx_hat_plus
+
+            x_hat_plus_tot  = np.concatenate((x_hat_plus_tot, np.array(x_hat_plus)), axis=1)
+            P_list.append(P_plus)
+
+            t_list.append(t)
 
         # FOR NEXT TIMESTEP, calculate new F_tilde, G_tilde, Omega_tilde, H_tilde_all
         F_tilde, G_tilde, Omega_tilde, H_tilde_all = eulerized_dt_jacobians(x_nom, dT, t)
@@ -630,23 +638,53 @@ def LKF(x0, dT, T, Qtrue, Rtrue, ydata):
         t_idx += 1
 
     # PLOTS
-    # LKF states
-    timesteps = np.arange(0,int(T),dT)
+    # Noisy Simulated Measurements
+    colors = [
+        '#E57373',  # Red
+        '#64B5F6',  # Blue
+        '#81C784',  # Green
+        '#FFB74D',  # Orange
+        '#BA68C8',  # Purple
+        '#F06292',  # Pink
+        '#FFF176',  # Yellow
+        '#4DD0E1',  # Cyan
+        '#8D6E63',  # Brown
+        '#4DB6AC',  # Teal
+        '#5C6BC0',  # Indigo
+        '#D4E157'   # Lime
+        ]
+
+    fig, ax = plt.subplots(4,1,sharex=True)
+    fig.suptitle('Noisy Simulated Measurement Data')
+    # ystar_tot_list   = []
+    # vis_station_list = []
+    for idx in range(len(t_list)-1):
+        t = t_list[idx+1]
+        ystar = ystar_tot_list[idx][0]
+        ystar_idx = -3
+        for id in vis_station_list[idx][0]:
+            ax[0].plot(t, ystar[ystar_idx + 3], color=colors[int(id)-1], marker='x')
+            ax[1].plot(t, ystar[ystar_idx + 4], color=colors[int(id)-1], marker='o')
+            ax[2].plot(t, ystar[ystar_idx + 5], color=colors[int(id)-1], marker='o')
+            ax[3].plot(t, (int(id)), color=colors[int(id)-1], marker='^')
+            ystar_idx += 3
+
+    # LKF state
     fig, ax = plt.subplots(4,1,sharex=True)
     fig.suptitle('Linearized Kalman Filter')
-    ax[0].plot(timesteps, np.squeeze(np.asarray(x_hat_plus_tot[0])), color='b')
+    ax[0].plot(t_list, np.squeeze(np.asarray(x_hat_plus_tot[0])), color='b')
     ax[0].set_title('X')
     ax[0].set_xlabel('Time (s)')
     ax[0].set_ylabel('Position (km)')
-    ax[1].plot(timesteps, np.squeeze(np.asarray(x_hat_plus_tot[1])), color='b')
+    ax[1].plot(t_list, np.squeeze(np.asarray(x_hat_plus_tot[1])), color='b')
     ax[1].set_title('X_dot')
     ax[1].set_xlabel('Time (s)')
     ax[1].set_ylabel('Velocity (km/s)')
-    ax[2].plot(timesteps, np.squeeze(np.asarray(x_hat_plus_tot[2])), color='b')
+    ax[2].plot(t_list, np.squeeze(np.asarray(x_hat_plus_tot[2])), color='b')
     ax[2].set_title('Y')
     ax[2].set_xlabel('Time (s)')
     ax[2].set_ylabel('Position (km)')
-    ax[3].plot(timesteps, np.squeeze(np.asarray(x_hat_plus_tot[3])), color='b')
+    ax[3].plot(t_list, np.squeeze(np.asarray(x_hat_plus_tot[3])), color='b')
     ax[3].set_title('Y_dot')
     ax[3].set_xlabel('Time (s)')
     ax[3].set_ylabel('Velocity (km/s)')
@@ -662,28 +700,42 @@ def LKF(x0, dT, T, Qtrue, Rtrue, ydata):
         lower_bounds    = [-2*np.sqrt(array[i, i]) for array in P_list]  # Extract the diagonal element (i, i) at each timestep
         upper_bounds = upper_bounds + x_hat_plus_tot[i]
         lower_bounds = lower_bounds + x_hat_plus_tot[i]
-        ax[i].plot(timesteps, upper_bounds, 'r-')
-        ax[i].plot(timesteps, lower_bounds, 'r-')
+        ax[i].plot(t_list, upper_bounds, 'r-')
+        ax[i].plot(t_list, lower_bounds, 'r-')
 
     plt.tight_layout()
 
     # Linearized KF State Estimation Errors
-    timesteps = np.arange(0,int(T),dT)
+    x_err    = []
+    xdot_err = []
+    y_err    = []
+    ydot_err = []
+    t_all = np.arange(0,int(T),dT)
+    for t in t_all:
+        if t in t_list:
+            t_all_idx  = int(t/10)
+            t_list_idx = t_list.index(t)
+            x_err.append(xstar.y[0,t_all_idx] - np.squeeze(np.asarray(x_hat_plus_tot[0]))[t_list_idx])
+            xdot_err.append(xstar.y[1,t_all_idx] - np.squeeze(np.asarray(x_hat_plus_tot[1]))[t_list_idx])
+            y_err.append(xstar.y[2,t_all_idx] - np.squeeze(np.asarray(x_hat_plus_tot[2]))[t_list_idx])
+            ydot_err.append(xstar.y[3,t_all_idx] - np.squeeze(np.asarray(x_hat_plus_tot[3]))[t_list_idx])
+
+
     fig, ax = plt.subplots(4,1,sharex=True)
-    fig.suptitle('Linearized KF State Perturbations')
-    ax[0].plot(timesteps, np.squeeze(np.asarray(dx_hat_plus_tot[0])), color='b')
+    fig.suptitle('Linearized KF State Estimation Errors')
+    ax[0].plot(t_list, x_err, color='b')
     ax[0].set_title('X')
     ax[0].set_xlabel('Time (s)')
     ax[0].set_ylabel('Position (km)')
-    ax[1].plot(timesteps, np.squeeze(np.asarray(dx_hat_plus_tot[1])), color='b')
+    ax[1].plot(t_list, xdot_err, color='b')
     ax[1].set_title('X_dot')
     ax[1].set_xlabel('Time (s)')
     ax[1].set_ylabel('Velocity (km/s)')
-    ax[2].plot(timesteps, np.squeeze(np.asarray(dx_hat_plus_tot[2])), color='b')
+    ax[2].plot(t_list, y_err, color='b')
     ax[2].set_title('Y')
     ax[2].set_xlabel('Time (s)')
     ax[2].set_ylabel('Position (km)')
-    ax[3].plot(timesteps, np.squeeze(np.asarray(dx_hat_plus_tot[3])), color='b')
+    ax[3].plot(t_list, ydot_err, color='b')
     ax[3].set_title('Y_dot')
     ax[3].set_xlabel('Time (s)')
     ax[3].set_ylabel('Velocity (km/s)')
@@ -694,16 +746,10 @@ def LKF(x0, dT, T, Qtrue, Rtrue, ydata):
         lower_bounds    = [-2*np.sqrt(array[i, i]) for array in P_list]  # Extract the diagonal element (i, i) at each timestep
         upper_bounds = upper_bounds
         lower_bounds = lower_bounds
-        ax[i].plot(timesteps, upper_bounds, 'r-')
-        ax[i].plot(timesteps, lower_bounds, 'r-')
-
-    ax[0].set_ylim([-510,510])
-    ax[1].set_ylim([-0.75,0.75])
-    ax[2].set_ylim([-510,510])
-    ax[3].set_ylim([-0.75,0.75])
+        ax[i].plot(t_list, upper_bounds, 'r-')
+        ax[i].plot(t_list, lower_bounds, 'r-')
 
     plt.tight_layout()
-
     plt.show()
     plt.close()
 
