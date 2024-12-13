@@ -438,40 +438,51 @@ def dt_linearized_measurements_sim(x0, dT, T):
     plt.close()
 
 # PART 2 ----------------------------------------------------------------------------------
-def monte_carlo_tmt(x0,Qtrue,T):
-    # HARD-CODED FOR NOW FOR REPRODUCIBILITY
-    np.random.seed(100)
-
+def monte_carlo_tmt(x0,Qtrue,T,plot=False):
     # ground truth states
     t_eval = np.linspace(0, T, int(T/10))
-    state_soln = odeint(dyn_sys, np.asarray(x0).flatten(), t_eval, args=(Qtrue,))
+    # odeint isn't working with the noise for some reason ... i swapped to solve_ivp
+    noisy_soln = solve_ivp(lambda t, y: dyn_sys(y, t, Qtrue), [0, T], np.asarray(x0).flatten(), t_eval=t_eval, method='RK45')
+    soln = odeint(dyn_sys, np.asarray(x0).flatten(), t_eval)
 
     # sanity check plots
     # Plot the results
-    fig, ax = plt.subplots(4,1,sharex=True)
-    fig.suptitle('Monte Carlo Sim (using scipy.odeint)')
-    ax[0].plot(t_eval, state_soln[:, 0])
-    ax[0].set_title('X')
-    ax[0].set_xlabel('Time (s)')
-    ax[0].set_ylabel('Position (km)')
-    ax[1].plot(t_eval, state_soln[:, 1])
-    ax[1].set_title('X_dot')
-    ax[1].set_xlabel('Time (s)')
-    ax[1].set_ylabel('Velocity (km/s)')
-    ax[2].plot(t_eval, state_soln[:, 2])
-    ax[2].set_title('Y')
-    ax[2].set_xlabel('Time (s)')
-    ax[2].set_ylabel('Position (km)')
-    ax[3].plot(t_eval, state_soln[:, 3])
-    ax[3].set_title('Y_dot')
-    ax[3].set_xlabel('Time (s)')
-    ax[3].set_ylabel('Velocity (km/s)')
-    plt.tight_layout()
+    if plot:
+        fig, ax = plt.subplots(4,1,sharex=True)
+        fig.suptitle('Monte Carlo Sim (using scipy.integrate.solve_ivp)')
+        ax[0].plot(t_eval, noisy_soln.y[0], color='b')
+        ax[0].plot(t_eval, soln[:,0], color='r')
+        ax[0].set_title('X')
+        ax[0].set_xlabel('Time (s)')
+        ax[0].set_ylabel('Position (km)')
+        ax[1].plot(t_eval, noisy_soln.y[1], color='b')
+        ax[1].plot(t_eval, soln[:,1], color='r')
+        ax[1].set_title('X_dot')
+        ax[1].set_xlabel('Time (s)')
+        ax[1].set_ylabel('Velocity (km/s)')
+        ax[2].plot(t_eval, noisy_soln.y[2], color='b')
+        ax[2].plot(t_eval, soln[:,2], color='r')
+        ax[2].set_title('Y')
+        ax[2].set_xlabel('Time (s)')
+        ax[2].set_ylabel('Position (km)')
+        ax[3].plot(t_eval, noisy_soln.y[3], color='b')
+        ax[3].plot(t_eval, soln[:,3], color='r')
+        ax[3].set_title('Y_dot')
+        ax[3].set_xlabel('Time (s)')
+        ax[3].set_ylabel('Velocity (km/s)')
 
-    plt.show()
-    plt.close()
+        ax[0].set_ylim([-7500,7500])
+        ax[1].set_ylim([-9,9])
+        ax[2].set_ylim([-7500,7500])
+        ax[3].set_ylim([-9,9])
 
-    return state_soln
+        fig.legend(['With Noise', 'Without Noise'], loc='lower center', bbox_to_anchor=(0.5,0))
+
+        plt.tight_layout()
+        plt.show()
+        plt.close()
+
+    return noisy_soln
 
 def LKF(x0, dT, T, Qtrue, Rtrue, ydata):
     """
@@ -534,7 +545,7 @@ def LKF(x0, dT, T, Qtrue, Rtrue, ydata):
     P_list          = [P_plus]
 
     # ground truth values
-    xstar = monte_carlo_tmt(x0,Qtrue,T)
+    xstar = monte_carlo_tmt(x0,Qtrue,T,False)
 
     t_idx = 1
     for t in range(dT,T,dT):
@@ -575,9 +586,8 @@ def LKF(x0, dT, T, Qtrue, Rtrue, ydata):
                 Xidot = tracking_station_data.Xidot(t, id)
                 Yidot = tracking_station_data.Yidot(t, id)
                 station_state = [Xi, Xidot, Yi, Yidot]
-                # *********** NEED TO DO GROUND TRUTH SIM HERE? ***********
                 # nominal sensor measurement at time k+1
-                state = xstar[t_idx, :]
+                state = [xstar.y[0][t_idx],xstar.y[1][t_idx],xstar.y[2][t_idx],xstar.y[3][t_idx]]
                 rho, rho_dot, phi = dyn_measurements(state, station_state, Rtrue)
                 y_star_id = np.array([[rho],[rho_dot],[phi]])
                 if y_star.size == 0:
@@ -585,7 +595,6 @@ def LKF(x0, dT, T, Qtrue, Rtrue, ydata):
                 else:
                     y_star = np.concatenate((y_star, np.array(y_star_id)), axis=0)
                     
-
                 if R_all.size == 0:
                     R_all = Rtrue
                 else:
