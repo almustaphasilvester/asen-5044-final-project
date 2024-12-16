@@ -826,6 +826,7 @@ if __name__ == "__main__":
     mu = 398600 # gravitational constant, km3/s2
     r0 = 6678   # orbital radius, km
     T = 14000   # HARD-CODED
+    np.random.seed(100)  # Random Set Seed
     T_tot = round(np.sqrt((4*(np.pi**2)*(r0**3))/mu))   # orbital period, s
 
     dT = 10 # 10 sec
@@ -857,3 +858,4 @@ if __name__ == "__main__":
 
     ydata_sim = monte_carlo_measurements_tmt(x0,Qtrue,Rtrue,T,plot=False)
     LKF(x0, dT, T, Qtrue, Rtrue, ydata_sim)
+    

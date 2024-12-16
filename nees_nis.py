@@ -24,8 +24,8 @@ def NEES(x_truth, x_est_post, P_post):
     # Comments
     # Run this at every k time and store NEES into an array, one column array per monte carlo run
     
-    est_error = x_truth - x_est_post
-    NEES = est_error.T @ P_post @ est_error
+    est_error = x_truth.flatten() - x_est_post.flatten()
+    NEES = est_error.T @ np.linalg.inv(P_post) @ est_error
     
     return NEES
 
@@ -50,28 +50,26 @@ def NEES_Chi2_Test(NEES_array, num_states, num_runs, alpha):
     
     k = np.shape(NEES_array)[0]
     
-    NEES_avg = np.average(NEES_array, axis=1)
+    NEES_avg = np.nanmean(NEES_array, axis=1)
     NEES_exp = num_states * np.ones(np.shape(NEES_avg))
     r1 = chi2.ppf(alpha/2, df=num_runs*num_states)/num_runs
     r2 = chi2.ppf(1 - (alpha/2), df=num_runs*num_states)/num_runs
-    
     res = stats.chisquare(NEES_avg, NEES_exp)
     
     timesteps = np.arange(0,k)
-    fig, ax = plt.subplot()
-    fig.suptitle('NEES Testing')
-    ax.plot(timesteps, NEES_avg, color='b')
-    ax.plot(timesteps, r1, color="g")
-    ax.plot(timesteps, r2, color="g")
-    ax.set_title('NEES Estimation Results')
+    ax = plt.subplot()
+    ax.plot(timesteps, NEES_avg, color='b', linestyle='', marker='o', fillstyle = 'none')
+    ax.plot(timesteps, r1 * np.ones(np.shape(timesteps)), color="g")
+    ax.plot(timesteps, r2 * np.ones(np.shape(timesteps)), color="g")
+    ax.set_title('NEES Testing')
     ax.set_xlabel('Timesteps, k')
     ax.set_ylabel('NEES Statistic')
 
     plt.tight_layout()
-    plt.show()
     plt.savefig("NEES Testing.png")
+    plt.show()
     
-    return NEES_avg
+    return NEES_avg, res
     
 def NIS(y_real, y_sim, S_k):
     
@@ -88,8 +86,8 @@ def NIS(y_real, y_sim, S_k):
     # Comments
     # Run this at every k time and store NIS into an array, one column array per monte carlo run
     
-    innov_error = y_real - y_sim
-    NIS = innov_error.T @ S_k @ innov_error
+    innov_error = y_real.flatten() - y_sim.flatten()
+    NIS = innov_error.T @ np.linalg.inv(S_k) @ innov_error
     
     return NIS
 
@@ -114,7 +112,7 @@ def NIS_Chi2_Test(NIS_array, num_meas, num_runs, alpha):
     
     k = np.shape(NIS_array)[0]
     
-    NIS_avg = np.average(NIS_array, axis=1)
+    NIS_avg = np.nanmean(NIS_array, axis=1)
     NIS_exp = num_meas * np.ones(np.shape(NIS_avg))
     r1 = chi2.ppf(alpha/2, df=num_runs*num_meas)/num_runs
     r2 = chi2.ppf(1 - (alpha/2), df=num_runs*num_meas)/num_runs
@@ -122,17 +120,16 @@ def NIS_Chi2_Test(NIS_array, num_meas, num_runs, alpha):
     res = stats.chisquare(NIS_avg, NIS_exp)
     
     timesteps = np.arange(0,k)
-    fig, ax = plt.subplot()
-    fig.suptitle('NIS Testing')
-    ax.plot(timesteps, NIS_avg, color='b')
-    ax.plot(timesteps, r1, color="g")
-    ax.plot(timesteps, r2, color="g")
-    ax.set_title('NIS Estimation Results')
+    ax = plt.subplot()
+    ax.plot(timesteps, NIS_avg, color='b', linestyle='', marker='o', fillstyle = 'none')
+    ax.plot(timesteps, r1 * np.ones(np.shape(timesteps)), color="g")
+    ax.plot(timesteps, r2 * np.ones(np.shape(timesteps)), color="g")
+    ax.set_title('NIS Testing')
     ax.set_xlabel('Timesteps, k')
     ax.set_ylabel('NIS Statistic')
 
     plt.tight_layout()
+    plt.savefig("NIS Testing.png")
     plt.show()
-    plt.savefig("NEES Testing.png")
     
     return NIS_avg, res
