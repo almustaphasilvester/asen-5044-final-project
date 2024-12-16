@@ -4,7 +4,7 @@ import sympy as sp
 import os, sys
 import pandas as pd
 from scipy.linalg import expm, block_diag
-from scipy.integrate import odeint, solve_ivp
+from scipy.integrate import solve_ivp
 from scipy.io import loadmat
 from scipy.stats import multivariate_normal as mvn
 
@@ -62,7 +62,7 @@ def nominal_measurements(t, i):
 
     return rho, rhodot, phi
 
-def dyn_sys(state, t, Qtrue=np.array([])):
+def dyn_sys(t, state, Qtrue=np.array([])):
     """
     define dynamical system with given equations
     """
@@ -78,9 +78,9 @@ def dyn_sys(state, t, Qtrue=np.array([])):
 
     # Compute the derivatives
     dx_dt = v_x
-    ddx_dt = (-mu * x) / (x**2 + y**2)**(3/2) + w1
+    ddx_dt = ((-mu * x) / (x**2 + y**2)**(3/2)) + w1
     dy_dt = v_y
-    ddy_dt = (-mu * y) / (x**2 + y**2)**(3/2) + w2
+    ddy_dt = ((-mu * y) / (x**2 + y**2)**(3/2)) + w2
     
     return [dx_dt, ddx_dt, dy_dt, ddy_dt]
 
@@ -176,7 +176,7 @@ def dt_linearization_measurements(x_nom, t):
 def dt_linearized_state_sim(x0, dT, T):
     """
     Simulate linearized DT dynamics model near nominal point
-    Validate against numerical integration routine (i.e. odeint)
+    Validate against numerical integration routine (i.e. solve_ivp)
     """
 
     # initialize F,G,H,M matrices at t=0
@@ -229,9 +229,9 @@ def dt_linearized_state_sim(x0, dT, T):
     ax[3].set_ylabel('Velocity (km/s)')
     plt.tight_layout()
 
-    # validate using scipy.integrate.odeint
+    # validate using scipy.integrate.solve_ivp
     t_eval = np.linspace(0, T, int(T/10))
-    soln = solve_ivp(lambda t, y: dyn_sys(y, t), [0, T], np.asarray(x0).flatten(), t_eval=t_eval, method='RK45')
+    soln = solve_ivp(dyn_sys, [0, T], np.asarray(x0).flatten(), t_eval=t_eval, method='RK45', rtol=1e-5)
 
     # Extract the results from the solution
     x_vals   = soln.y[0]
@@ -241,7 +241,7 @@ def dt_linearized_state_sim(x0, dT, T):
 
     # Plot the results
     fig, ax = plt.subplots(4,1,sharex=True)
-    fig.suptitle('Full Nonlinear Dynamics Simulation (using scipy.odeint)')
+    fig.suptitle('Full Nonlinear Dynamics Simulation (using scipy.solve_ivp)')
     ax[0].plot(t_eval, x_vals, color='r')
     ax[0].set_title('X')
     ax[0].set_xlabel('Time (s)')
@@ -286,7 +286,7 @@ def dt_linearized_state_sim(x0, dT, T):
 def dt_linearized_measurements_sim(x0, dT, T):
     """
     Simulate linearized DT measurement model near nominal point
-    Validate against numerical integration routine (i.e. odeint)
+    Validate against numerical integration routine (i.e. solve_ivp)
     """
     colors = [
         '#E57373',  # Red
@@ -375,12 +375,11 @@ def dt_linearized_measurements_sim(x0, dT, T):
 
     plt.tight_layout()
 
-    # validate using scipy.integrate.odeint
+    # validate using scipy.integrate.solve_ivp
     t_eval = np.linspace(0, T, int(T/10))
-    #soln = odeint(dyn_sys, np.asarray(x0).flatten(), t_eval)
-    soln = solve_ivp(lambda t, y: dyn_sys(y, t), [0, T], np.asarray(x0).flatten(), t_eval=t_eval, method='RK45')
+    soln = solve_ivp(dyn_sys, [0, T], np.asarray(x0).flatten(), t_eval=t_eval, method='RK45', rtol=1e-5)
     fig, ax = plt.subplots(4,1,sharex=True)
-    fig.suptitle('Full Nonlinear Measurements Simulation (using scipy.odeint)')
+    fig.suptitle('Full Nonlinear Measurements Simulation (using scipy.integrate.solve_ivp)')
     ax[0].set_title('rho_i')
     ax[0].set_xlabel('Time (s)')
     ax[0].set_ylabel('Range (km)')
@@ -414,9 +413,6 @@ def dt_linearized_measurements_sim(x0, dT, T):
             state  = soln.y[:,t_idx]
             rho, rho_dot, phi = dyn_measurements(state, station_state)
 
-            if t > 5000:
-                print(phi)
-
             if (phi >= el_L_lim) and (phi <= el_H_lim):
                 y = np.array([[rho],[rho_dot],[phi]])
                 vis_list.append(i+1)
@@ -449,9 +445,8 @@ def dt_linearized_measurements_sim(x0, dT, T):
 # PART 2 ----------------------------------------------------------------------------------
 def monte_carlo_states_tmt(x0,Qtrue,T,plot=False):
     t_eval = np.linspace(0, T, int(T/10))
-    # odeint isn't working with the noise for some reason ... i swapped to solve_ivp
-    noisy_soln = solve_ivp(lambda t, y: dyn_sys(y, t, Qtrue), [0, T], np.asarray(x0).flatten(), t_eval=t_eval, method='RK45')
-    soln = solve_ivp(lambda t, y: dyn_sys(y, t), [0, T], np.asarray(x0).flatten(), t_eval=t_eval, method='RK45')
+    noisy_soln = solve_ivp(dyn_sys, [0, T], np.asarray(x0).flatten(), t_eval=t_eval, method='RK45',args=(Qtrue,), rtol=1e-5)
+    soln = solve_ivp(dyn_sys, [0, T], np.asarray(x0).flatten(), t_eval=t_eval, method='RK45', rtol=1e-5)
 
     # sanity check plots
     # Plot the results
@@ -493,10 +488,9 @@ def monte_carlo_states_tmt(x0,Qtrue,T,plot=False):
     return noisy_soln
 
 def monte_carlo_measurements_tmt(x0,Qtrue,Rtrue,T,plot=False):
-    # validate using scipy.integrate.odeint
+    # validate using scipy.integrate.solve_ivp
     t_eval = np.linspace(0, T, int(T/10))
-    noisy_soln = solve_ivp(lambda t, y: dyn_sys(y, t, Qtrue), [0, T], np.asarray(x0).flatten(), t_eval=t_eval, method='RK45')
-    soln = solve_ivp(lambda t, y: dyn_sys(y, t), [0, T], np.asarray(x0).flatten(), t_eval=t_eval, method='RK45')
+    noisy_soln = solve_ivp(dyn_sys, [0, T], np.asarray(x0).flatten(), t_eval=t_eval, method='RK45',args=(Qtrue,), rtol=1e-5)
 
     if plot:
         colors = [
@@ -514,7 +508,7 @@ def monte_carlo_measurements_tmt(x0,Qtrue,Rtrue,T,plot=False):
         '#D4E157'   # Lime
         ]
         fig, ax = plt.subplots(4,1,sharex=True)
-        fig.suptitle('Full Nonlinear Measurements Simulation (using scipy.odeint)')
+        fig.suptitle('Noisy Simulated Measurement Data')
         ax[0].set_title('rho_i')
         ax[0].set_xlabel('Time (s)')
         ax[0].set_ylabel('Range (km)')
@@ -528,8 +522,8 @@ def monte_carlo_measurements_tmt(x0,Qtrue,Rtrue,T,plot=False):
         ax[3].set_xlabel('Time (s)')
         ax[3].set_ylabel('Station ID')
     
+    y_soln = [np.array([]) for i in range(int(T/dT))]
     for i in range(12):
-        vis_list = []
         vis_list_noisy = []
         t_idx = 1
         for t in range(dT,int(T),dT):
@@ -545,48 +539,46 @@ def monte_carlo_measurements_tmt(x0,Qtrue,Rtrue,T,plot=False):
             el_L_lim = (-0.5*np.pi)+theta
             el_H_lim = (0.5*np.pi)+theta
 
-            state = soln.y[:,t_idx]
+            #state = soln.y[:,t_idx]
             state_noisy = noisy_soln.y[:,t_idx]
-            rho, rho_dot, phi = dyn_measurements(state, station_state)
             rho_noisy, rho_dot_noisy, phi_noisy = dyn_measurements(state_noisy, station_state,Rtrue)
-
-            if (phi >= el_L_lim) and (phi <= el_H_lim):
-                y = np.array([[rho],[rho_dot],[phi]])
-                vis_list.append(i+1)
-            else:
-                y = np.array([[np.nan],[np.nan],[np.nan]])
-                vis_list.append(np.nan)
 
             if (phi_noisy >= el_L_lim) and (phi_noisy <= el_H_lim):
                 y_noisy = np.array([[rho_noisy],[rho_dot_noisy],[phi_noisy]])
                 vis_list_noisy.append(i+1)
+                if y_soln[t_idx-1].size == 0:
+                    y_soln[t_idx-1] = np.array([[rho_noisy],[rho_dot_noisy],[phi_noisy],[i+1]])
+                else:
+                    y_soln[t_idx-1] = np.concatenate((y_soln[t_idx-1], np.array([[rho_noisy],[rho_dot_noisy],[phi_noisy],[i+1]])), axis=1)
             else:
                 y_noisy = np.array([[np.nan],[np.nan],[np.nan]])
                 vis_list_noisy.append(np.nan)
 
             if t == dT:
-                y_soln = y
                 y_noisy_soln = y_noisy
             else:
-                y_soln = np.concatenate((y_soln, y), axis=1)
-                y_noisy_soln = np.concatenate((y_noisy, y), axis=1)
+                y_noisy_soln = np.concatenate((y_noisy_soln, y_noisy), axis=1)
 
             t_idx += 1
 
         # Plot results
         if plot:
             timesteps = np.arange(dT,int(T),dT)
-            ax[0].plot(timesteps, np.squeeze(np.asarray(y_soln[0])), color=colors[i], marker='x')
-            ax[1].plot(timesteps, np.squeeze(np.asarray(y_soln[1])), color=colors[i], marker='o', fillstyle='none')
-            ax[2].plot(timesteps, np.squeeze(np.asarray(y_soln[2])), color=colors[i], marker='o', fillstyle='none')
-            ax[3].plot(timesteps, vis_list, color=colors[i], marker='^')
+            ax[0].plot(timesteps, np.squeeze(np.asarray(y_noisy_soln[0])), color=colors[i], marker='x')
+            ax[1].plot(timesteps, np.squeeze(np.asarray(y_noisy_soln[1])), color=colors[i], marker='o', fillstyle='none')
+            ax[2].plot(timesteps, np.squeeze(np.asarray(y_noisy_soln[2])), color=colors[i], marker='o', fillstyle='none')
+            ax[3].plot(timesteps, vis_list_noisy, color=colors[i], marker='^')
 
     if plot:
+        ax[0].set_ylim([0,2250])
+        ax[1].set_ylim([-10,10])
+        ax[2].set_ylim([-5,5])
+        ax[3].set_ylim([0,12])
         plt.tight_layout()
         plt.show()
         plt.close()
 
-    return y_noisy_soln
+    return y_soln
 
 def LKF(x0, dT, T, Qtrue, Rtrue, ydata):
     """
@@ -642,18 +634,15 @@ def LKF(x0, dT, T, Qtrue, Rtrue, ydata):
     
     # LKF TUNING
     P_plus     = np.diag([0.01,0.001,0.01,0.001])
-    Q_LKF = np.eye(2)*1e-9    # hardcode to Qtrue for now?
+    Q_LKF = np.eye(2)*1e-10
     
     x_hat_plus_tot   = x_hat_plus + dx_hat_plus       # ie nominal + perturb
-    ystar_tot_list   = []
     vis_station_list = []
     P_list           = [P_plus]
     t_list           = [0]
 
     # ground truth values
-    xstar = monte_carlo_states_tmt(x0,Qtrue,T,True)
-    ytmt  = monte_carlo_measurements_tmt(x0,Qtrue,Rtrue,T,True)
-    sys.exit()
+    xstar = monte_carlo_states_tmt(x0,Qtrue,T,False)
 
     t_idx = 1
     for t in range(dT,T,dT):
@@ -667,12 +656,12 @@ def LKF(x0, dT, T, Qtrue, Rtrue, ydata):
 
         # MEASUREMENT UPDATE/CORRECTION STEP FOR TIME k+1
         # actual received sensor measurement
-        y_full_vect = ytmt[t_idx]
+        y_full_vect = ydata[t_idx]
         if y_full_vect.size != 0:
             visible_stations = y_full_vect[3,:]
             H_tilde = np.array([])
-            y       = np.array([])
-            ystar  = np.array([])
+            yk1     = np.array([])
+            ystar   = np.array([])
             R_all   = np.array([])
             idx     = 0
             vis_station_list.append([visible_stations])
@@ -681,10 +670,10 @@ def LKF(x0, dT, T, Qtrue, Rtrue, ydata):
                 # stack measurement vectors
                 y_id = y_full_vect[0:3,idx]
                 y_id = np.array([[y_id[0]],[y_id[1]],[y_id[2]]])
-                if y.size == 0:
-                    y = y_id
+                if yk1.size == 0:
+                    yk1 = y_id
                 else:
-                    y = np.concatenate((y, np.array(y_id)), axis=0)
+                    yk1 = np.concatenate((yk1, np.array(y_id)), axis=0)
 
                 # stack H matrices
                 H_tilde_id = H_tilde_all[id]
@@ -701,7 +690,7 @@ def LKF(x0, dT, T, Qtrue, Rtrue, ydata):
                 station_state = [Xi, Xidot, Yi, Yidot]
                 
                 # nominal sensor measurement at time k+1
-                state = [xstar.y[0][t_idx],xstar.y[1][t_idx],xstar.y[2][t_idx],xstar.y[3][t_idx]]
+                state = [x, xdot, y, ydot]
                 rho, rho_dot, phi = dyn_measurements(state, station_state, Rtrue)
                 ystar_id = np.array([[rho],[rho_dot],[phi]])
                 if ystar.size == 0:
@@ -716,11 +705,8 @@ def LKF(x0, dT, T, Qtrue, Rtrue, ydata):
 
                 idx += 1
 
-            # save noisy simulated measurements for plotting
-            ystar_tot_list.append([ystar])
-
             # nominal sensor measurement at time k+1
-            dy = y - ystar
+            dy = yk1 - ystar
 
             # Kalman Gain
             K = P_minus@(H_tilde.T)@(np.linalg.inv((H_tilde@P_minus@(H_tilde.T) + R_all)))
@@ -745,50 +731,6 @@ def LKF(x0, dT, T, Qtrue, Rtrue, ydata):
         t_idx += 1
 
     # PLOTS
-    # Noisy Simulated Measurements
-    colors = [
-        '#E57373',  # Red
-        '#64B5F6',  # Blue
-        '#81C784',  # Green
-        '#FFB74D',  # Orange
-        '#BA68C8',  # Purple
-        '#F06292',  # Pink
-        '#FFF176',  # Yellow
-        '#4DD0E1',  # Cyan
-        '#8D6E63',  # Brown
-        '#4DB6AC',  # Teal
-        '#5C6BC0',  # Indigo
-        '#D4E157'   # Lime
-        ]
-
-    fig, ax = plt.subplots(4,1,sharex=True)
-    fig.suptitle('Noisy Simulated Measurement Data')
-    for idx in range(len(t_list)-1):
-        t = t_list[idx+1]
-        ystar = ystar_tot_list[idx][0]
-        ystar_idx = -3
-        for id in vis_station_list[idx][0]:
-            ax[0].plot(t, ystar[ystar_idx + 3], color=colors[int(id)-1], marker='x')
-            ax[1].plot(t, ystar[ystar_idx + 4], color=colors[int(id)-1], marker='o')
-            ax[2].plot(t, ystar[ystar_idx + 5], color=colors[int(id)-1], marker='o')
-            ax[3].plot(t, (int(id)), color=colors[int(id)-1], marker='^')
-            ystar_idx += 3
-
-    ax[0].set_title('rho_i')
-    ax[0].set_xlabel('Time (s)')
-    ax[0].set_ylabel('Range (km)')
-    ax[1].set_title('rho_dot_i')
-    ax[1].set_xlabel('Time (s)')
-    ax[1].set_ylabel('Range Rate (km/s)')
-    ax[2].set_title('phi_i')
-    ax[2].set_xlabel('Time (s)')
-    ax[2].set_ylabel('Elevation (rad)')
-    ax[3].set_title('Visible Stations')
-    ax[3].set_xlabel('Time (s)')
-    ax[3].set_ylabel('Station ID')
-
-    plt.tight_layout()
-
     # LKF state
     fig, ax = plt.subplots(4,1,sharex=True)
     fig.suptitle('Linearized Kalman Filter')
@@ -902,7 +844,7 @@ if __name__ == "__main__":
 
     # simulate the linearize DT dynamics and measurement models
     #dt_linearized_state_sim(x0,dT,T)
-    dt_linearized_measurements_sim(x0,dT,T)
+    #dt_linearized_measurements_sim(x0,dT,T)
 
     # linearized kalman filter (LKF)
     # input files
@@ -913,4 +855,5 @@ if __name__ == "__main__":
     measLabels = (pd.read_csv(os.path.join(input_files_dir, 'measLabels.csv'), header=None)).values.tolist()    # labels for measurements dataframe
     ydata = loadmat(os.path.join(input_files_dir,'orbitdeterm_finalproj_KFdata.mat'))['ydata'][0]
 
-    #LKF(x0, dT, T, Qtrue, Rtrue, ydata)
+    ydata_sim = monte_carlo_measurements_tmt(x0,Qtrue,Rtrue,T,plot=False)
+    LKF(x0, dT, T, Qtrue, Rtrue, ydata_sim)
