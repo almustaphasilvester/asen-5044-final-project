@@ -212,6 +212,9 @@ def ekf_simulation(t_span, dt):
         #x_state = np.array([[x_nom], [dx_nom], [y_nom], [dy_nom]])
         x_estimates.append(x_est)
         P_history.append(P)
+        
+        # NEES Calculation
+        NEES_list.append(NEES(xstar.y[:,t_idx-1], x_est, P))
     
     return np.array(x_estimates), np.array(P_history)
 

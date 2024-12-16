@@ -581,7 +581,7 @@ def monte_carlo_measurements_tmt(x0,Qtrue,Rtrue,T,plot=False):
 
     return y_soln
 
-def LKF(x0, dT, T, Qtrue, Rtrue, ydata, plot=False):
+def LKF(x0, dT, T, Qtrue, Rtrue, ydata, Q_LKF = np.eye(2)*1e-10, plot=False):
     """
     Implement and tune a linearized KF using the specified nominal state trajectory
     """
@@ -635,7 +635,6 @@ def LKF(x0, dT, T, Qtrue, Rtrue, ydata, plot=False):
     
     # LKF TUNING
     P_plus = np.diag([0.01,0.001,0.01,0.001])
-    Q_LKF = np.eye(2)*1e-10
     
     x_hat_plus_tot   = x_hat_plus + dx_hat_plus       # ie nominal + perturb
     vis_station_list = []
@@ -839,7 +838,268 @@ def LKF(x0, dT, T, Qtrue, Rtrue, ydata, plot=False):
     
     est_errors = np.array([x_err, xdot_err, y_err, ydot_err])
     
-    return x_hat_plus_tot, est_errors, NEES_list, NIS_list
+    return x_hat_plus_tot, est_errors, P_list, NEES_list, NIS_list
+
+def EKF(x0, dT, T, Qtrue, Rtrue, ydata, Q_EKF = np.eye(2)*1e-10, plot=False):
+    """
+    Implement and tune an extended KF using the specified nominal state trajectory
+    """
+    
+    def eulerized_dt_jacobians(x_minus, x_plus, dT, t):
+        # predicted point
+        X_minus    = x_minus[0][0]
+        Xdot_minus = x_minus[1][0]
+        Y_minus    = x_minus[2][0]
+        Ydot_minus = x_minus[3][0]
+        
+        # updated point
+        X_plus    = x_plus[0][0]
+        Xdot_plus = x_plus[1][0]
+        Y_plus    = x_plus[2][0]
+        Ydot_plus = x_plus[3][0]
+
+        # CT nonlinear model Jacobians - evaluated at nominal point
+        A_nom = np.array([[0,1,0,0]\
+                ,[(-mu*(Y_plus**2 - 2*(X_plus**2)))/((X_plus**2 + Y_plus**2)**2.5), 0, (3*mu*X_plus*Y_plus)/((X_plus**2 + Y_plus**2)**2.5), 0]\
+                ,[0,0,0,1]\
+                ,[3*mu*X_plus*Y_plus/((X_plus**2 + Y_plus**2)**2.5), 0, (-mu*(X_plus**2 - 2*(Y_plus**2)))/((X_plus**2 + Y_plus**2)**2.5), 0]])
+        B_nom = np.array([[0, 0]\
+                ,[1,0]\
+                ,[0,0]\
+                ,[0,1]])
+        C_nom = {}
+        for i in range(12):
+            Xi_nom = tracking_station_data.Xi(t, i)
+            Yi_nom = tracking_station_data.Yi(t, i)
+            Xidot_nom = tracking_station_data.Xidot(t, i)
+            Yidot_nom = tracking_station_data.Yidot(t, i)
+            C_nom[i] = np.array([[(X_minus-Xi_nom)/np.sqrt((X_minus-Xi_nom)**2 + (Y_minus-Yi_nom)**2), 0, (Y_minus-Yi_nom)/np.sqrt((X_minus-Xi_nom)**2 + (Y_minus-Yi_nom)**2), 0],\
+                        [((Y_minus-Yi_nom)*((Xdot_minus-Xidot_nom)*(Y_minus-Yi_nom) - (Ydot_minus - Yidot_nom)*(X_minus-Xi_nom)))/(((X_minus-Xi_nom)**2 + (Y_minus-Yi_nom)**2)**1.5),\
+                            (X_minus-Xi_nom)/np.sqrt((X_minus-Xi_nom)**2 + (Y_minus-Yi_nom)**2),\
+                            ((X_minus-Xi_nom)*((Ydot_minus-Yidot_nom)*(X_minus-Xi_nom) - (Xdot_minus - Xidot_nom)*(Y_minus-Yi_nom)))/(((X_minus-Xi_nom)**2 + (Y_minus-Yi_nom)**2)**1.5),\
+                            (Y_minus-Yi_nom)/np.sqrt((X_minus-Xi_nom)**2 + (Y_minus-Yi_nom)**2),],\
+                        [-(Y_minus-Yi_nom)/((X_minus-Xi_nom)**2 + (Y_minus-Yi_nom)**2), 0, (X_minus-Xi_nom)/((X_minus-Xi_nom)**2 + (Y_minus-Yi_nom)**2), 0]])
+        Gamma_nom = np.array([[0 ,0]\
+                            ,[1, 0]\
+                            ,[0, 0]\
+                            ,[0, 1]])
+        
+        F_tilde = np.identity(np.shape(A_nom)[0]) + dT*A_nom
+        G_tilde = dT*B_nom
+        Omega_tilde = dT*Gamma_nom
+        H_tilde = C_nom
+
+        return F_tilde, G_tilde, Omega_tilde, H_tilde
+
+    # initialize at t=0
+    x_hat_plus = np.array(x0)
+    dx_hat_plus = np.array([[0],[0.075],[0],[-0.021]])
+    du = np.zeros((2,1))
+
+    F_tilde, G_tilde, Omega_tilde, H_tilde_all = eulerized_dt_jacobians(x0, x0, dT, 0)
+    
+    # LKF TUNING
+    P_plus = np.diag([0.01,0.001,0.01,0.001])
+    
+    x_hat_plus_tot   = x_hat_plus + dx_hat_plus       # ie nominal + perturb
+    vis_station_list = []
+    P_list           = [P_plus]
+    t_list           = [0]
+    NEES_list        = []
+    NIS_list         = []
+
+    # ground truth values
+    xstar = monte_carlo_states_tmt(x0,Qtrue,T,False)
+    x_hat_plus = x_hat_plus + dx_hat_plus
+
+    t_idx = 1
+    for t in range(dT,T,dT):
+
+        # TIME UPDATE/PREDICTION STEP FOR TIME k+1
+        x_hat_ivp   = solve_ivp(dyn_sys, [0, dT], np.asarray(x_hat_plus).flatten(), t_eval=[0], method='RK45', rtol=1e-5)
+        x_hat_minus = x_hat_ivp.y
+        P_minus     = (F_tilde@P_plus@(F_tilde.T)) + (Omega_tilde@Q_EKF@(Omega_tilde.T))
+
+        # MEASUREMENT UPDATE/CORRECTION STEP FOR TIME k+1
+        # actual received sensor measurement
+        y_full_vect = ydata[t_idx]
+        if y_full_vect.size != 0:
+            visible_stations = y_full_vect[3,:]
+            H_tilde = np.array([])
+            yk1     = np.array([])
+            ystar   = np.array([])
+            R_all   = np.array([])
+            idx     = 0
+            vis_station_list.append([visible_stations])
+            for id in visible_stations:
+                id -= 1
+                # stack measurement vectors
+                y_id = y_full_vect[0:3,idx]
+                y_id = np.array([[y_id[0]],[y_id[1]],[y_id[2]]])
+                if yk1.size == 0:
+                    yk1 = y_id
+                else:
+                    yk1 = np.concatenate((yk1, np.array(y_id)), axis=0)
+
+                # stack H matrices
+                H_tilde_id = H_tilde_all[id]
+                if H_tilde.size == 0:
+                    H_tilde = np.array(H_tilde_id)
+                else:
+                    H_tilde = np.concatenate((H_tilde, np.array(H_tilde_id)), axis=0)
+
+                # stack nominal measurements
+                Xi = tracking_station_data.Xi(t, id)
+                Yi = tracking_station_data.Yi(t, id)
+                Xidot = tracking_station_data.Xidot(t, id)
+                Yidot = tracking_station_data.Yidot(t, id)
+                station_state = [Xi, Xidot, Yi, Yidot]
+                
+                # nominal sensor measurement at time k+1
+                state = x_hat_minus.flatten().tolist()
+                rho, rho_dot, phi = dyn_measurements(state, station_state)
+                ystar_id = np.array([[rho],[rho_dot],[phi]])
+                if ystar.size == 0:
+                    ystar = np.array(ystar_id)
+                else:
+                    ystar = np.concatenate((ystar, np.array(ystar_id)), axis=0)
+                    
+                if R_all.size == 0:
+                    R_all = Rtrue
+                else:
+                    R_all = block_diag(R_all, Rtrue)
+
+                idx += 1
+
+            # nominal sensor measurement at time k+1
+            innov = yk1 
+            # Kalman Gain
+            S_k = H_tilde@P_minus@(H_tilde.T) + R_all
+            K = P_minus@(H_tilde.T)@(np.linalg.inv(S_k))
+
+            # Covariance Matrix
+            P_plus = (np.identity(np.shape(P_minus)[0]) - (K@H_tilde))@P_minus
+
+            # state estimate
+            x_hat_plus = x_hat_minus + K@(innov - (H_tilde@x_hat_minus))
+
+            x_hat_plus_tot  = np.concatenate((x_hat_plus_tot, np.array(x_hat_plus)), axis=1)
+            P_list.append(P_plus)
+
+            t_list.append(t)
+            
+            # NIS Calculation
+            NIS_list.append(NIS(yk1, ystar, S_k))
+        
+        else: # NIS Calculation
+            NIS_list.append(np.nan)
+        
+        # FOR NEXT TIMESTEP, calculate new F_tilde, G_tilde, Omega_tilde, H_tilde_all
+        F_tilde, G_tilde, Omega_tilde, H_tilde_all = eulerized_dt_jacobians(x_hat_minus, x_hat_plus, dT, t)
+        
+        # NEES Calculation
+        NEES_list.append(NEES(xstar.y[:,t_idx-1], x_hat_plus, P_plus))
+        
+        # NEES/NIS Debug
+        # print("NEES: ", NEES_list[t_idx-1])
+        # print("NIS: ", NIS_list[t_idx-1])
+        
+        t_idx += 1
+        
+    # PLOTS
+    # EKF state
+    if plot:
+        fig, ax = plt.subplots(4,1,sharex=True)
+        fig.suptitle('Linearized Kalman Filter')
+        ax[0].plot(t_list, np.squeeze(np.asarray(x_hat_plus_tot[0])), color='b')
+        ax[0].set_title('X')
+        ax[0].set_xlabel('Time (s)')
+        ax[0].set_ylabel('Position (km)')
+        ax[1].plot(t_list, np.squeeze(np.asarray(x_hat_plus_tot[1])), color='b')
+        ax[1].set_title('X_dot')
+        ax[1].set_xlabel('Time (s)')
+        ax[1].set_ylabel('Velocity (km/s)')
+        ax[2].plot(t_list, np.squeeze(np.asarray(x_hat_plus_tot[2])), color='b')
+        ax[2].set_title('Y')
+        ax[2].set_xlabel('Time (s)')
+        ax[2].set_ylabel('Position (km)')
+        ax[3].plot(t_list, np.squeeze(np.asarray(x_hat_plus_tot[3])), color='b')
+        ax[3].set_title('Y_dot')
+        ax[3].set_xlabel('Time (s)')
+        ax[3].set_ylabel('Velocity (km/s)')
+
+        ax[0].set_ylim([-7500,7500])
+        ax[1].set_ylim([-9,9])
+        ax[2].set_ylim([-7500,7500])
+        ax[3].set_ylim([-9,9])
+
+        # plot confidence bounds
+        for i in range(4):
+            upper_bounds    = [2*np.sqrt(array[i, i]) for array in P_list]  # Extract the diagonal element (i, i) at each timestep
+            lower_bounds    = [-2*np.sqrt(array[i, i]) for array in P_list]  # Extract the diagonal element (i, i) at each timestep
+            upper_bounds = upper_bounds + x_hat_plus_tot[i]
+            lower_bounds = lower_bounds + x_hat_plus_tot[i]
+            ax[i].plot(t_list, upper_bounds, 'r-')
+            ax[i].plot(t_list, lower_bounds, 'r-')
+
+        fig.legend(['Filter State', 'Filter 2sigma bounds'], loc='lower center', bbox_to_anchor=(0.5,0))
+
+        plt.tight_layout()
+
+    # Extended KF State Estimation Errors
+    x_err    = []
+    xdot_err = []
+    y_err    = []
+    ydot_err = []
+    t_all = np.arange(0,int(T),dT)
+    for t in t_all:
+        if t in t_list:
+            t_all_idx  = int(t/10)
+            t_list_idx = t_list.index(t)
+            x_err.append(xstar.y[0,t_all_idx] - np.squeeze(np.asarray(x_hat_plus_tot[0]))[t_list_idx])
+            xdot_err.append(xstar.y[1,t_all_idx] - np.squeeze(np.asarray(x_hat_plus_tot[1]))[t_list_idx])
+            y_err.append(xstar.y[2,t_all_idx] - np.squeeze(np.asarray(x_hat_plus_tot[2]))[t_list_idx])
+            ydot_err.append(xstar.y[3,t_all_idx] - np.squeeze(np.asarray(x_hat_plus_tot[3]))[t_list_idx])
+
+    if plot:
+        fig, ax = plt.subplots(4,1,sharex=True)
+        fig.suptitle('Linearized KF State Estimation Errors')
+        ax[0].plot(t_list, x_err, color='b')
+        ax[0].set_title('X')
+        ax[0].set_xlabel('Time (s)')
+        ax[0].set_ylabel('Position (km)')
+        ax[1].plot(t_list, xdot_err, color='b')
+        ax[1].set_title('X_dot')
+        ax[1].set_xlabel('Time (s)')
+        ax[1].set_ylabel('Velocity (km/s)')
+        ax[2].plot(t_list, y_err, color='b')
+        ax[2].set_title('Y')
+        ax[2].set_xlabel('Time (s)')
+        ax[2].set_ylabel('Position (km)')
+        ax[3].plot(t_list, ydot_err, color='b')
+        ax[3].set_title('Y_dot')
+        ax[3].set_xlabel('Time (s)')
+        ax[3].set_ylabel('Velocity (km/s)')
+
+        # plot confidence bounds
+        for i in range(4):
+            upper_bounds    = [2*np.sqrt(array[i, i]) for array in P_list]  # Extract the diagonal element (i, i) at each timestep
+            lower_bounds    = [-2*np.sqrt(array[i, i]) for array in P_list]  # Extract the diagonal element (i, i) at each timestep
+            upper_bounds = upper_bounds
+            lower_bounds = lower_bounds
+            ax[i].plot(t_list, upper_bounds, 'r-')
+            ax[i].plot(t_list, lower_bounds, 'r-')
+
+        fig.legend(['Filter Error', 'Filter 2sigma bounds'], loc='lower center', bbox_to_anchor=(0.5,0))
+
+        plt.tight_layout()
+        plt.show()
+        plt.close()
+    
+    est_errors = np.array([x_err, xdot_err, y_err, ydot_err])
+    
+    return x_hat_plus_tot, est_errors, P_list, NEES_list, NIS_list
+
 
 # MAIN =====================================================================================
 
@@ -884,21 +1144,33 @@ if __name__ == "__main__":
     tvec  =(pd.read_csv(os.path.join(input_files_dir, 'tvec.csv'), header=None)).values.tolist()      # time vector
     measLabels = (pd.read_csv(os.path.join(input_files_dir, 'measLabels.csv'), header=None)).values.tolist()    # labels for measurements dataframe
     ydata = loadmat(os.path.join(input_files_dir,'orbitdeterm_finalproj_KFdata.mat'))['ydata'][0]
-    Qtest = np.array([[1e-5, 0], [0, 1e-8]])
-    Rtest = np.array([[1e-4, 0, 0], [0, 1, 0], [0, 0, 1e-4]])
-    print(Qtest)
+
+    ydata_sim = monte_carlo_measurements_tmt(x0,Qtrue,Rtrue,T,plot=False)
+    
+    # KF Tunings
+    Q_LKF = np.array([[1e-6, 0], [0, 1e-6]])
+    Q_EKF = np.array([[1e-6, 0], [0, 1e-6]])
+    
     start = time()
-    ydata_sim = monte_carlo_measurements_tmt(x0,Qtest,Rtrue,T,plot=False)
     NEES_array = []
     NIS_array = []
-    print(time() - start)
+    
+    # for i in range(num_mc_runs):
+        # res_lkf = LKF(x0, dT, T, Qtrue, Rtrue, ydata_sim, Q_LKF = Q_LKF)
+        # NEES_array.append(res_lkf[3])
+        # NIS_array.append(res_lkf[4])
+    # print(time() - start)
+        
+    # NIS_Chi2_Test(np.asarray(NIS_array).T, num_meas, num_mc_runs, alpha)    
+    # NEES_Chi2_Test(np.asarray(NEES_array).T, num_states, num_mc_runs, alpha)
     
     for i in range(num_mc_runs):
-        print(i)
-        res = LKF(x0, dT, T, Qtest, Rtrue, ydata_sim)
-        NEES_array.append(res[2])
-        NIS_array.append(res[3])
-        print(time() - start)
+        res_ekf = EKF(x0, dT, T, Qtrue, Rtrue, ydata_sim, Q_EKF = Q_EKF, plot=True)
+        NEES_array.append(res_ekf[3])
+        NIS_array.append(res_ekf[4])
+    print(time() - start)
         
     NIS_Chi2_Test(np.asarray(NIS_array).T, num_meas, num_mc_runs, alpha)    
     NEES_Chi2_Test(np.asarray(NEES_array).T, num_states, num_mc_runs, alpha)
+    
+    
