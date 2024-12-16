@@ -1124,7 +1124,7 @@ if __name__ == "__main__":
     
     # Monte-Carlo parameters
     np.random.seed(100)  # Random Set Seed
-    num_mc_runs = 1     # Number of Monte-Carlo Runs
+    num_mc_runs = 20     # Number of Monte-Carlo Runs
     alpha = 0.05         # Confidence
     
     T_tot = round(np.sqrt((4*(np.pi**2)*(r0**3))/mu))   # orbital period, s
@@ -1162,11 +1162,11 @@ if __name__ == "__main__":
     
     # KF Tunings
     Q_LKF = np.eye(2) * 1e-6
-    Q_EKF = np.eye(2) * 1e-10
+    Q_EKF = np.eye(2) * 1e-8
     
     start = time()
-    NEES_array = []
-    NIS_array = []
+    # NEES_array = []
+    # NIS_array = []
     
     # for i in range(num_mc_runs):
         # res_lkf = LKF(x0, dT, T, Qtrue, Rtrue, ydata_sim, Q_LKF = Q_LKF)
@@ -1177,8 +1177,11 @@ if __name__ == "__main__":
     # NIS_Chi2_Test(np.asarray(NIS_array).T, num_meas, num_mc_runs, alpha)    
     # NEES_Chi2_Test(np.asarray(NEES_array).T, num_states, num_mc_runs, alpha)
     
+    NEES_array = []
+    NIS_array = []
+    
     for i in range(num_mc_runs):
-        res_ekf = EKF(x0, dT, T, Qtrue, Rtrue, ydata_sim, plot=True)
+        res_ekf = EKF(x0, dT, T, Qtrue, Rtrue, ydata_sim, Q_EKF = Q_EKF)
         NEES_array.append(res_ekf[3])
         NIS_array.append(res_ekf[4])
     print(time() - start)
