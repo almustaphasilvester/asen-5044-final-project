@@ -8,6 +8,7 @@ from scipy.integrate import solve_ivp
 from scipy.io import loadmat
 from scipy.stats import multivariate_normal as mvn
 from nees_nis import *
+from ekf import *
 from time import time
 
 # NOMINAL/NONLINEAR MODELS ----------------------------------------------------------------
@@ -898,8 +899,8 @@ def EKF(x0, dT, T, Qtrue, Rtrue, ydata, Q_EKF = np.eye(2)*1e-10, plot=False):
 
     F_tilde, G_tilde, Omega_tilde, H_tilde_all = eulerized_dt_jacobians(x0, x0, dT, 0)
     
-    # LKF TUNING
-    P_plus = np.diag([0.01,0.001,0.01,0.001])
+    # EKF TUNING
+    P_plus = np.diag([0.01,0.01,0.01,0.01])
     
     x_hat_plus_tot   = x_hat_plus + dx_hat_plus       # ie nominal + perturb
     vis_station_list = []
@@ -911,13 +912,16 @@ def EKF(x0, dT, T, Qtrue, Rtrue, ydata, Q_EKF = np.eye(2)*1e-10, plot=False):
     # ground truth values
     xstar = monte_carlo_states_tmt(x0,Qtrue,T,False)
     x_hat_plus = x_hat_plus + dx_hat_plus
+    
+    t_eval = np.linspace(0, T, int(T/10))
 
     t_idx = 1
     for t in range(dT,T,dT):
 
         # TIME UPDATE/PREDICTION STEP FOR TIME k+1
-        x_hat_ivp   = solve_ivp(dyn_sys, [0, dT], np.asarray(x_hat_plus).flatten(), t_eval=[0], method='RK45', rtol=1e-5)
-        x_hat_minus = x_hat_ivp.y
+        x_hat_ivp   = solve_ivp(dyn_sys, [0, dT], np.asarray(x_hat_plus).flatten(), t_eval=[dT], args=(Qtrue,), method='RK45', rtol=1e-5)
+        x_hat_minus = x_hat_ivp.y[:,0].reshape((4,1))
+        #import pdb; pdb.set_trace()
         P_minus     = (F_tilde@P_plus@(F_tilde.T)) + (Omega_tilde@Q_EKF@(Omega_tilde.T))
 
         # MEASUREMENT UPDATE/CORRECTION STEP FOR TIME k+1
@@ -956,7 +960,7 @@ def EKF(x0, dT, T, Qtrue, Rtrue, ydata, Q_EKF = np.eye(2)*1e-10, plot=False):
                 station_state = [Xi, Xidot, Yi, Yidot]
                 
                 # nominal sensor measurement at time k+1
-                state = x_hat_minus.flatten().tolist()
+                state = x_hat_minus.flatten()
                 rho, rho_dot, phi = dyn_measurements(state, station_state)
                 ystar_id = np.array([[rho],[rho_dot],[phi]])
                 if ystar.size == 0:
@@ -972,7 +976,7 @@ def EKF(x0, dT, T, Qtrue, Rtrue, ydata, Q_EKF = np.eye(2)*1e-10, plot=False):
                 idx += 1
 
             # nominal sensor measurement at time k+1
-            innov = yk1 
+            innov = yk1  - ystar
             # Kalman Gain
             S_k = H_tilde@P_minus@(H_tilde.T) + R_all
             K = P_minus@(H_tilde.T)@(np.linalg.inv(S_k))
@@ -981,18 +985,27 @@ def EKF(x0, dT, T, Qtrue, Rtrue, ydata, Q_EKF = np.eye(2)*1e-10, plot=False):
             P_plus = (np.identity(np.shape(P_minus)[0]) - (K@H_tilde))@P_minus
 
             # state estimate
-            x_hat_plus = x_hat_minus + K@(innov - (H_tilde@x_hat_minus))
-
-            x_hat_plus_tot  = np.concatenate((x_hat_plus_tot, np.array(x_hat_plus)), axis=1)
-            P_list.append(P_plus)
-
-            t_list.append(t)
+            x_hat_plus = x_hat_minus + K@innov
             
             # NIS Calculation
             NIS_list.append(NIS(yk1, ystar, S_k))
         
-        else: # NIS Calculation
+        else: 
+            
+            # Covariance Matrix
+            P_plus = P_minus
+
+            # state estimate
+            x_hat_plus = x_hat_minus
+            
+            # NIS Calculation
             NIS_list.append(np.nan)
+        
+        x_hat_plus_tot  = np.concatenate((x_hat_plus_tot, np.array(x_hat_plus)), axis=1)
+        P_list.append(P_plus)
+
+        t_list.append(t)
+        
         
         # FOR NEXT TIMESTEP, calculate new F_tilde, G_tilde, Omega_tilde, H_tilde_all
         F_tilde, G_tilde, Omega_tilde, H_tilde_all = eulerized_dt_jacobians(x_hat_minus, x_hat_plus, dT, t)
@@ -1010,7 +1023,7 @@ def EKF(x0, dT, T, Qtrue, Rtrue, ydata, Q_EKF = np.eye(2)*1e-10, plot=False):
     # EKF state
     if plot:
         fig, ax = plt.subplots(4,1,sharex=True)
-        fig.suptitle('Linearized Kalman Filter')
+        fig.suptitle('Extended Kalman Filter')
         ax[0].plot(t_list, np.squeeze(np.asarray(x_hat_plus_tot[0])), color='b')
         ax[0].set_title('X')
         ax[0].set_xlabel('Time (s)')
@@ -1063,7 +1076,7 @@ def EKF(x0, dT, T, Qtrue, Rtrue, ydata, Q_EKF = np.eye(2)*1e-10, plot=False):
 
     if plot:
         fig, ax = plt.subplots(4,1,sharex=True)
-        fig.suptitle('Linearized KF State Estimation Errors')
+        fig.suptitle('Extended KF State Estimation Errors')
         ax[0].plot(t_list, x_err, color='b')
         ax[0].set_title('X')
         ax[0].set_xlabel('Time (s)')
@@ -1111,7 +1124,7 @@ if __name__ == "__main__":
     
     # Monte-Carlo parameters
     np.random.seed(100)  # Random Set Seed
-    num_mc_runs = 20     # Number of Monte-Carlo Runs
+    num_mc_runs = 1     # Number of Monte-Carlo Runs
     alpha = 0.05         # Confidence
     
     T_tot = round(np.sqrt((4*(np.pi**2)*(r0**3))/mu))   # orbital period, s
@@ -1148,8 +1161,8 @@ if __name__ == "__main__":
     ydata_sim = monte_carlo_measurements_tmt(x0,Qtrue,Rtrue,T,plot=False)
     
     # KF Tunings
-    Q_LKF = np.array([[1e-6, 0], [0, 1e-6]])
-    Q_EKF = np.array([[1e-6, 0], [0, 1e-6]])
+    Q_LKF = np.eye(2) * 1e-6
+    Q_EKF = np.eye(2) * 1e-10
     
     start = time()
     NEES_array = []
@@ -1165,12 +1178,51 @@ if __name__ == "__main__":
     # NEES_Chi2_Test(np.asarray(NEES_array).T, num_states, num_mc_runs, alpha)
     
     for i in range(num_mc_runs):
-        res_ekf = EKF(x0, dT, T, Qtrue, Rtrue, ydata_sim, Q_EKF = Q_EKF, plot=True)
+        res_ekf = EKF(x0, dT, T, Qtrue, Rtrue, ydata_sim, plot=True)
         NEES_array.append(res_ekf[3])
         NIS_array.append(res_ekf[4])
     print(time() - start)
         
     NIS_Chi2_Test(np.asarray(NIS_array).T, num_meas, num_mc_runs, alpha)    
     NEES_Chi2_Test(np.asarray(NEES_array).T, num_states, num_mc_runs, alpha)
+
+    # # Run Simulation
+    # est_x, est_P = ekf_simulation(14000, 10, x0)
+
+    # diff = est_x.reshape((1400,4)).T - res_ekf[0]
+    # import pdb; pdb.set_trace()
     
+    # # Plot estimated states over time
+    # fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(15,10))
+    # time = np.arange(0, 14000, 10)  # Create time array from 0 to 14000s with 10s steps
     
+    # # Plot x position
+    # ax1.plot(time, diff[0])
+    # ax1.set_xlabel('Time (seconds)')
+    # ax1.set_ylabel('Estimated X Position (km)')
+    # ax1.set_title('EKF Estimated X Position vs Time')
+    # ax1.grid(True)
+
+    # # Plot x velocity 
+    # ax2.plot(time, diff[1])
+    # ax2.set_xlabel('Time (seconds)')
+    # ax2.set_ylabel('Estimated X Velocity (km/s)')
+    # ax2.set_title('EKF Estimated X Velocity vs Time')
+    # ax2.grid(True)
+
+    # # Plot y position
+    # ax3.plot(time, diff[2])
+    # ax3.set_xlabel('Time (seconds)')
+    # ax3.set_ylabel('Estimated Y Position (km)')
+    # ax3.set_title('EKF Estimated Y Position vs Time')
+    # ax3.grid(True)
+
+    # # Plot y velocity
+    # ax4.plot(time, diff[3])
+    # ax4.set_xlabel('Time (seconds)')
+    # ax4.set_ylabel('Estimated Y Velocity (km/s)')
+    # ax4.set_title('EKF Estimated Y Velocity vs Time')
+    # ax4.grid(True)
+    
+    # plt.tight_layout()
+    # plt.show()

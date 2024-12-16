@@ -7,16 +7,19 @@ from scipy.integrate import solve_ivp
 from nees_nis import *
 
 # Calculate Nominal Points
-def calculate_nominal_points(t, T):
+def calculate_nominal_points(t, T, r0):
+    mu_static = 398600
     theta_nom = (t/T)*(2*np.pi)
-    x_nom = np.cos(theta_nom) * x0
-    y_nom = np.sin(theta_nom) * x0
-    xd_nom = -1*np.sin(theta_nom) * x0 * (mu_static/x0**3)**(1/2)
-    yd_nom = np.cos(theta_nom) * x0 * (mu_static/x0**3)**(1/2)
+    x_nom = np.cos(theta_nom) * r0
+    y_nom = np.sin(theta_nom) * r0
+    xd_nom = -1*np.sin(theta_nom) * r0 * (mu_static/r0**3)**(1/2)
+    yd_nom = np.cos(theta_nom) * r0 * (mu_static/r0**3)**(1/2)
     return x_nom, y_nom, xd_nom, yd_nom
 
 # Calculate Tracking Stations
 def caclulate_tracking_stations(station_number, t, T):
+    w = 2*np.pi/86400
+    Re = 6378
     theta = (station_number)*(np.pi/6)
     x_s = Re*np.cos(w * t + theta)
     y_s = Re*np.sin(w * t + theta)
@@ -25,6 +28,7 @@ def caclulate_tracking_stations(station_number, t, T):
     return x_s, y_s, xd_s, yd_s
 
 def ode_simulation():
+    np.random.seed(100)
     noise = np.random.multivariate_normal([0,0], np.eye(2) * 1e-10)
 
     # Parameters
@@ -90,9 +94,48 @@ def ode_simulation():
 
     return solution
 
-def ekf_simulation(t_span, dt):
+def ekf_simulation(t_span, dt, x_est):
+    
+    # Define Symbols
+    x, y, dx, dy, x_s, dx_s, y_s, dy_s, mu = sp.symbols("x y dx dy x_s dx_s y_s dy_s mu")
+    u1, u2, w1, w2 = sp.symbols("u1 u2 w1 w2")
+
+    # Define System Equations
+    f1 = -mu*x*(1/((x**2 + y**2)**(1/2)))**3 + u1 + w1
+    f2 = -mu*y*(1/((x**2 + y**2)**(1/2)))**3 + u2 + w2
+    f3 = dx
+    f4 = dy
+    f5 = ((x-x_s)**2 + (y-y_s)**2)**(1/2)
+    f6 = ((x - x_s)*(dx - dx_s) + (y - y_s)*(dy - dy_s))/((x - x_s)**2 + (y - y_s)**2)**(1/2)
+    f7 = sp.atan2((y-y_s), (x-x_s))
+
+    # Define State Vector
+    f_x = sp.Matrix([f3, f1, f4, f2])
+
+    # Define Jacobians
+    A = f_x.jacobian([x, dx, y, dy])
+    B = f_x.jacobian([u1, u2])
+
+    # Define Output Vector
+    f_y = sp.Matrix([f5, f6, f7])
+
+    # Define Jacobians
+    C = f_y.jacobian([x, dx, y, dy])
+    D = f_y.jacobian([u1, u2])
+
+    Omega = f_x.jacobian([w1, w2])
+    Omega = np.array(Omega.tolist())
+    
+    mu_static = 398600
+    w = 2*np.pi/86400
+    Re = 6378
+    r0 = 6678
+    
+    T_orbit = round(np.sqrt((4*(np.pi**2)*(r0**3))/mu_static))
+    
+    solution = ode_simulation()
     # Initialize state and covariance
-    x_est = np.array([[x0], [xd0], [y0], [yd0]])  # Initial state estimate (4x1)
+    #x_est = np.array([[x0], [xd0], [y0], [yd0]])  # Initial state estimate (4x1)
     #x_est = np.array([[0],[0.075],[0],[-0.021]])
     P = np.eye(4) * 1/100  # Initial covariance estimate (4x4)
     
@@ -107,7 +150,7 @@ def ekf_simulation(t_span, dt):
 
     # Get Jacobian A
 
-    x_nom, y_nom, dx_nom, dy_nom = calculate_nominal_points(0, T_orbit)
+    x_nom, y_nom, dx_nom, dy_nom = calculate_nominal_points(0, T_orbit, r0)
 
     A_k = np.array(A.subs({
     x: x_nom, dx: dx_nom,
@@ -123,7 +166,7 @@ def ekf_simulation(t_span, dt):
             print(f"Processing time step {k} of {t_span}")
         
         # 1. Prediction Step
-        x_nom, y_nom, dx_nom, dy_nom = calculate_nominal_points(k, T_orbit)
+        x_nom, y_nom, dx_nom, dy_nom = calculate_nominal_points(k, T_orbit, r0)
         
         x_pred = np.array([[x_nom], [dx_nom], [y_nom], [dy_nom]]) #F_k @ x_est
         P_pred = F_k @ P @ F_k.T + Omega @ Q @ Omega.T
@@ -219,86 +262,86 @@ def ekf_simulation(t_span, dt):
     
     return np.array(x_estimates), np.array(P_history)
 
-if __name__ == "__main__":
+# if __name__ == "__main__":
 
-    # Define Symbols
-    x, y, dx, dy, x_s, dx_s, y_s, dy_s, mu = sp.symbols("x y dx dy x_s dx_s y_s dy_s mu")
-    u1, u2, w1, w2 = sp.symbols("u1 u2 w1 w2")
+    # # Define Symbols
+    # x, y, dx, dy, x_s, dx_s, y_s, dy_s, mu = sp.symbols("x y dx dy x_s dx_s y_s dy_s mu")
+    # u1, u2, w1, w2 = sp.symbols("u1 u2 w1 w2")
 
-    # Define System Equations
-    f1 = -mu*x*(1/((x**2 + y**2)**(1/2)))**3 + u1 + w1
-    f2 = -mu*y*(1/((x**2 + y**2)**(1/2)))**3 + u2 + w2
-    f3 = dx
-    f4 = dy
-    f5 = ((x-x_s)**2 + (y-y_s)**2)**(1/2)
-    f6 = ((x - x_s)*(dx - dx_s) + (y - y_s)*(dy - dy_s))/((x - x_s)**2 + (y - y_s)**2)**(1/2)
-    f7 = sp.atan2((y-y_s), (x-x_s))
+    # # Define System Equations
+    # f1 = -mu*x*(1/((x**2 + y**2)**(1/2)))**3 + u1 + w1
+    # f2 = -mu*y*(1/((x**2 + y**2)**(1/2)))**3 + u2 + w2
+    # f3 = dx
+    # f4 = dy
+    # f5 = ((x-x_s)**2 + (y-y_s)**2)**(1/2)
+    # f6 = ((x - x_s)*(dx - dx_s) + (y - y_s)*(dy - dy_s))/((x - x_s)**2 + (y - y_s)**2)**(1/2)
+    # f7 = sp.atan2((y-y_s), (x-x_s))
 
-    # Define State Vector
-    f_x = sp.Matrix([f3, f1, f4, f2])
+    # # Define State Vector
+    # f_x = sp.Matrix([f3, f1, f4, f2])
 
-    # Define Jacobians
-    A = f_x.jacobian([x, dx, y, dy])
-    B = f_x.jacobian([u1, u2])
+    # # Define Jacobians
+    # A = f_x.jacobian([x, dx, y, dy])
+    # B = f_x.jacobian([u1, u2])
 
-    # Define Output Vector
-    f_y = sp.Matrix([f5, f6, f7])
+    # # Define Output Vector
+    # f_y = sp.Matrix([f5, f6, f7])
 
-    # Define Jacobians
-    C = f_y.jacobian([x, dx, y, dy])
-    D = f_y.jacobian([u1, u2])
+    # # Define Jacobians
+    # C = f_y.jacobian([x, dx, y, dy])
+    # D = f_y.jacobian([u1, u2])
 
-    Omega = f_x.jacobian([w1, w2])
-    Omega = np.array(Omega.tolist())
+    # Omega = f_x.jacobian([w1, w2])
+    # Omega = np.array(Omega.tolist())
 
-    # Define Initial Conditions
-    mu_static = 398600
-    w = 2*np.pi/86400
-    Re = 6378
-    x0 = 6678
-    xd0 = 0
-    y0 = 0
-    yd0 = x0*((mu_static/x0**3)**(1/2))
+    # # Define Initial Conditions
+    # mu_static = 398600
+    # w = 2*np.pi/86400
+    # Re = 6378
+    # x0 = 6678
+    # xd0 = 0
+    # y0 = 0
+    # yd0 = x0*((mu_static/x0**3)**(1/2))
 
-    T_orbit = round(np.sqrt((4*(np.pi**2)*(x0**3))/mu_static))
+    # T_orbit = round(np.sqrt((4*(np.pi**2)*(x0**3))/mu_static))
 
-    # Get ODE Solution
-    solution = ode_simulation()
+    # # Get ODE Solution
+    # solution = ode_simulation()
 
-    # Run Simulation
-    est_x, est_P = ekf_simulation(14000, 10)
+    # # Run Simulation
+    # est_x, est_P = ekf_simulation(14000, 10)
 
-    # Plot estimated states over time
-    fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(15,10))
-    time = np.arange(0, 14000, 10)  # Create time array from 0 to 14000s with 10s steps
+    # # Plot estimated states over time
+    # fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(15,10))
+    # time = np.arange(0, 14000, 10)  # Create time array from 0 to 14000s with 10s steps
 
-    # Plot x position
-    ax1.plot(time, est_x[:,0,0])
-    ax1.set_xlabel('Time (seconds)')
-    ax1.set_ylabel('Estimated X Position (km)')
-    ax1.set_title('EKF Estimated X Position vs Time')
-    ax1.grid(True)
+    # # Plot x position
+    # ax1.plot(time, est_x[:,0,0])
+    # ax1.set_xlabel('Time (seconds)')
+    # ax1.set_ylabel('Estimated X Position (km)')
+    # ax1.set_title('EKF Estimated X Position vs Time')
+    # ax1.grid(True)
 
-    # Plot x velocity 
-    ax2.plot(time, np.array(est_x)[:,1,0])
-    ax2.set_xlabel('Time (seconds)')
-    ax2.set_ylabel('Estimated X Velocity (km/s)')
-    ax2.set_title('EKF Estimated X Velocity vs Time')
-    ax2.grid(True)
+    # # Plot x velocity 
+    # ax2.plot(time, np.array(est_x)[:,1,0])
+    # ax2.set_xlabel('Time (seconds)')
+    # ax2.set_ylabel('Estimated X Velocity (km/s)')
+    # ax2.set_title('EKF Estimated X Velocity vs Time')
+    # ax2.grid(True)
 
-    # Plot y position
-    ax3.plot(time, np.array(est_x)[:,2,0])
-    ax3.set_xlabel('Time (seconds)')
-    ax3.set_ylabel('Estimated Y Position (km)')
-    ax3.set_title('EKF Estimated Y Position vs Time')
-    ax3.grid(True)
+    # # Plot y position
+    # ax3.plot(time, np.array(est_x)[:,2,0])
+    # ax3.set_xlabel('Time (seconds)')
+    # ax3.set_ylabel('Estimated Y Position (km)')
+    # ax3.set_title('EKF Estimated Y Position vs Time')
+    # ax3.grid(True)
 
-    # Plot y velocity
-    ax4.plot(time, np.array(est_x)[:,3,0])
-    ax4.set_xlabel('Time (seconds)')
-    ax4.set_ylabel('Estimated Y Velocity (km/s)')
-    ax4.set_title('EKF Estimated Y Velocity vs Time')
-    ax4.grid(True)
+    # # Plot y velocity
+    # ax4.plot(time, np.array(est_x)[:,3,0])
+    # ax4.set_xlabel('Time (seconds)')
+    # ax4.set_ylabel('Estimated Y Velocity (km/s)')
+    # ax4.set_title('EKF Estimated Y Velocity vs Time')
+    # ax4.grid(True)
 
-    plt.tight_layout()
-    plt.show()
+    # plt.tight_layout()
+    # plt.show()
