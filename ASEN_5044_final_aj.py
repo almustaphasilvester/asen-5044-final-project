@@ -633,7 +633,7 @@ def LKF(x0, dT, T, Qtrue, Rtrue, ydata):
     F_tilde, G_tilde, Omega_tilde, H_tilde_all = eulerized_dt_jacobians(x0, dT, 0)
     
     # LKF TUNING
-    P_plus     = np.diag([0.01,0.001,0.01,0.001])
+    P_plus = np.diag([0.01,0.001,0.01,0.001])
     Q_LKF = np.eye(2)*1e-10
     
     x_hat_plus_tot   = x_hat_plus + dx_hat_plus       # ie nominal + perturb
@@ -691,7 +691,7 @@ def LKF(x0, dT, T, Qtrue, Rtrue, ydata):
                 
                 # nominal sensor measurement at time k+1
                 state = [x, xdot, y, ydot]
-                rho, rho_dot, phi = dyn_measurements(state, station_state, Rtrue)
+                rho, rho_dot, phi = dyn_measurements(state, station_state)
                 ystar_id = np.array([[rho],[rho_dot],[phi]])
                 if ystar.size == 0:
                     ystar = np.array(ystar_id)
