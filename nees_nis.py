@@ -54,7 +54,7 @@ def NEES_Chi2_Test(NEES_array, num_states, num_runs, alpha):
     NEES_exp = num_states * np.ones(np.shape(NEES_avg))
     r1 = chi2.ppf(alpha/2, df=num_runs*num_states)/num_runs
     r2 = chi2.ppf(1 - (alpha/2), df=num_runs*num_states)/num_runs
-    res = stats.chisquare(NEES_avg, NEES_exp)
+    #res = stats.chisquare(NEES_avg, NEES_exp)
     
     timesteps = np.arange(0,k)
     ax = plt.subplot()
@@ -69,7 +69,7 @@ def NEES_Chi2_Test(NEES_array, num_states, num_runs, alpha):
     plt.savefig("NEES Testing.png")
     plt.show()
     
-    return NEES_avg, res
+    return NEES_avg#, res
     
 def NIS(y_real, y_sim, S_k):
     

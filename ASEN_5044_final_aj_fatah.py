@@ -8,6 +8,7 @@ from scipy.integrate import solve_ivp
 from scipy.io import loadmat
 from scipy.stats import multivariate_normal as mvn
 from nees_nis import *
+from time import time
 
 # NOMINAL/NONLINEAR MODELS ----------------------------------------------------------------
 
@@ -76,7 +77,6 @@ def dyn_sys(t, state, Qtrue=np.array([])):
         w2 = 0
 
     x, v_x, y, v_y = state
-    print('ya!')
     # Compute the derivatives
     dx_dt = v_x
     ddx_dt = ((-mu * x) / (x**2 + y**2)**(3/2)) + w1
@@ -851,7 +851,7 @@ if __name__ == "__main__":
     
     # Monte-Carlo parameters
     np.random.seed(100)  # Random Set Seed
-    num_mc_runs = 1     # Number of Monte-Carlo Runs
+    num_mc_runs = 20     # Number of Monte-Carlo Runs
     alpha = 0.05         # Confidence
     
     T_tot = round(np.sqrt((4*(np.pi**2)*(r0**3))/mu))   # orbital period, s
@@ -884,17 +884,21 @@ if __name__ == "__main__":
     tvec  =(pd.read_csv(os.path.join(input_files_dir, 'tvec.csv'), header=None)).values.tolist()      # time vector
     measLabels = (pd.read_csv(os.path.join(input_files_dir, 'measLabels.csv'), header=None)).values.tolist()    # labels for measurements dataframe
     ydata = loadmat(os.path.join(input_files_dir,'orbitdeterm_finalproj_KFdata.mat'))['ydata'][0]
-    Qtest = np.array([[1e-3, 0], [0, 1e-6]])
+    Qtest = np.array([[1e-5, 0], [0, 1e-8]])
+    Rtest = np.array([[1e-4, 0, 0], [0, 1, 0], [0, 0, 1e-4]])
     print(Qtest)
+    start = time()
     ydata_sim = monte_carlo_measurements_tmt(x0,Qtest,Rtrue,T,plot=False)
     NEES_array = []
     NIS_array = []
-
+    print(time() - start)
+    
     for i in range(num_mc_runs):
         print(i)
         res = LKF(x0, dT, T, Qtest, Rtrue, ydata_sim)
         NEES_array.append(res[2])
         NIS_array.append(res[3])
+        print(time() - start)
         
     NIS_Chi2_Test(np.asarray(NIS_array).T, num_meas, num_mc_runs, alpha)    
-    #NEES_Chi2_Test(np.asarray(NEES_array).T, num_states, num_mc_runs, alpha)
+    NEES_Chi2_Test(np.asarray(NEES_array).T, num_states, num_mc_runs, alpha)
