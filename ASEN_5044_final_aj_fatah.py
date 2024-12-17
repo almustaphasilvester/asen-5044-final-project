@@ -631,7 +631,7 @@ def LKF(x0, P0, dT, T, Qtrue, Rtrue, ydata, Q_LKF = np.eye(2)*1e-10, plot=False)
     # initialize at t=0
     x_hat_plus = np.array(x0)
     P_plus = P0
-    dx0 = [0,0.075,0,-0.021]
+    dx0 = [68,0.075,68,-0.075]
     dx_hat_vals = np.random.multivariate_normal(dx0, P_plus)
     dx_hat_plus = np.array([[dx_hat_vals[0]],[dx_hat_vals[1]],[dx_hat_vals[2]],[dx_hat_vals[3]]])
     du = np.zeros((2,1))
@@ -646,12 +646,12 @@ def LKF(x0, P0, dT, T, Qtrue, Rtrue, ydata, Q_LKF = np.eye(2)*1e-10, plot=False)
     NIS_list         = []
 
     # ground truth values
-    xstar, x_nom = monte_carlo_states_tmt(x0,Qtrue,T,False)
+    x_tmt, xstar = monte_carlo_states_tmt(x0,Qtrue,T,False)
 
-    t_idx = 1
+    # t_idx = 1
     for t in range(dT,T,dT):
+        t_idx = int(t/dT)
         # calculate nominal orbit at time k+1
-        # x, xdot, y, ydot = nominal_orbit(t)
         x_nom_t = xstar.y[:,t_idx]
         x_nom = np.array([[x_nom_t[0]],[x_nom_t[1]],[x_nom_t[2]],[x_nom_t[3]]])
 
@@ -733,11 +733,11 @@ def LKF(x0, P0, dT, T, Qtrue, Rtrue, ydata, Q_LKF = np.eye(2)*1e-10, plot=False)
             NIS_list.append(NIS(yk1, ystar, S_k))
         
         else: 
-            
             # Covariance Matrix
             P_plus = P_minus
 
             # state estimate
+            dx_hat_plus = dx_hat_minus
             x_hat_plus = x_nom
             
             # NIS Calculation
@@ -748,11 +748,8 @@ def LKF(x0, P0, dT, T, Qtrue, Rtrue, ydata, Q_LKF = np.eye(2)*1e-10, plot=False)
 
         t_list.append(t)
         
-        # # FOR NEXT TIMESTEP, calculate new F_tilde, G_tilde, Omega_tilde, H_tilde_all
-        # F_tilde, G_tilde, Omega_tilde, H_tilde_all = eulerized_dt_jacobians(x_nom, dT, t)
-        
         # NEES Calculation
-        NEES_list.append(NEES(xstar.y[:,t_idx], x_hat_plus, P_plus))
+        NEES_list.append(NEES(x_tmt.y[:,t_idx], x_hat_plus, P_plus))
         
         # NEES/NIS Debug
         # print("NEES: ", NEES_list[t_idx-1])
@@ -810,10 +807,10 @@ def LKF(x0, P0, dT, T, Qtrue, Rtrue, ydata, Q_LKF = np.eye(2)*1e-10, plot=False)
         if t in t_list:
             t_all_idx  = int(t/10)
             t_list_idx = t_list.index(t)
-            x_err.append(xstar.y[0,t_all_idx] - np.squeeze(np.asarray(x_hat_plus_tot[0]))[t_list_idx])
-            xdot_err.append(xstar.y[1,t_all_idx] - np.squeeze(np.asarray(x_hat_plus_tot[1]))[t_list_idx])
-            y_err.append(xstar.y[2,t_all_idx] - np.squeeze(np.asarray(x_hat_plus_tot[2]))[t_list_idx])
-            ydot_err.append(xstar.y[3,t_all_idx] - np.squeeze(np.asarray(x_hat_plus_tot[3]))[t_list_idx])
+            x_err.append(x_tmt.y[0,t_all_idx] - np.squeeze(np.asarray(x_hat_plus_tot[0]))[t_list_idx])
+            xdot_err.append(x_tmt.y[1,t_all_idx] - np.squeeze(np.asarray(x_hat_plus_tot[1]))[t_list_idx])
+            y_err.append(x_tmt.y[2,t_all_idx] - np.squeeze(np.asarray(x_hat_plus_tot[2]))[t_list_idx])
+            ydot_err.append(x_tmt.y[3,t_all_idx] - np.squeeze(np.asarray(x_hat_plus_tot[3]))[t_list_idx])
 
     if plot:
         fig, ax = plt.subplots(4,1,sharex=True)
@@ -843,6 +840,11 @@ def LKF(x0, P0, dT, T, Qtrue, Rtrue, ydata, Q_LKF = np.eye(2)*1e-10, plot=False)
             lower_bounds = lower_bounds
             ax[i].plot(t_list, upper_bounds, 'r-')
             ax[i].plot(t_list, lower_bounds, 'r-')
+
+        ax[0].set_ylim([-250,250])
+        ax[1].set_ylim([-2.5,2.5])
+        ax[2].set_ylim([-250,250])
+        ax[3].set_ylim([-2.5,2.5])
 
         fig.legend(['Filter Error', 'Filter 2sigma bounds'], loc='lower center', bbox_to_anchor=(0.5,0))
 
@@ -1172,29 +1174,27 @@ if __name__ == "__main__":
     ydata_sim = monte_carlo_measurements_tmt(x0,Qtrue,Rtrue,T,plot=False)
     
     # KF Tunings
-    Q_LKF = np.diag([1e-6,1e-6])
-    P0_LKF = np.diag([1e-1,1e-2,1e-1,1e-2])
-    Q_EKF = np.eye(2) * 1e-6
-    P0_EKF = np.diag([10,0.1,10,0.1])
+    Q_LKF = np.diag([1e-2,1e-2])
+    P0_LKF = np.diag([3.5,0.7,3.5,0.7])
     
     start = time()
-    # NEES_array = []
-    # NIS_array = []
-    
-    # for i in range(num_mc_runs):
-    #     if i == 0:
-    #         plot_arg = True
-    #     else:
-    #         plot_arg = False
-    #     res_lkf = LKF(x0, P0_LKF, dT, T, Qtrue, Rtrue, ydata_sim, Q_LKF=Q_LKF, plot=plot_arg)#, plot=True)
-    #     NEES_array.append(res_lkf[3])
-    #     NIS_array.append(res_lkf[4])
-    # print("LKF elapsed:", time() - start)
+    NEES_array = []
+    NIS_array = []
+
+    for i in range(num_mc_runs):
+        if i == 0:
+            plot_arg = True
+        else:
+            plot_arg = False
+        res_lkf = LKF(x0, P0_LKF, dT, T, Qtrue, Rtrue, ydata_sim, Q_LKF=Q_LKF, plot=plot_arg)#, plot=True)
+        NEES_array.append(res_lkf[3])
+        NIS_array.append(res_lkf[4])
+    print("LKF elapsed:", time() - start)
         
-    # nis_lkf, stat_nis_lkf = NIS_Chi2_Test(np.asarray(NIS_array).T, num_meas, num_mc_runs, alpha, title="LKF NIS Testing")    
-    # NEES_Chi2_Test(np.asarray(NEES_array).T, num_states, num_mc_runs, alpha, title="LKF NEES Testing")
+    nis_lkf, stat_nis_lkf = NIS_Chi2_Test(np.asarray(NIS_array).T, num_meas, num_mc_runs, alpha, title="LKF NIS Testing")    
+    NEES_Chi2_Test(np.asarray(NEES_array).T, num_states, num_mc_runs, alpha, title="LKF NEES Testing")
     
-    # print(stat_nis_lkf)
+    print(stat_nis_lkf)
     
     def run_ekf(Q_EKF):
         NEES_array = []
