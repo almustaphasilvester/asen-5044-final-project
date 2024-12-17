@@ -5,6 +5,7 @@ import os, sys
 import pandas as pd
 from scipy.linalg import expm, block_diag
 from scipy.integrate import solve_ivp
+from scipy.optimize import minimize
 from scipy.io import loadmat
 from scipy.stats import multivariate_normal as mvn
 from nees_nis import *
@@ -906,12 +907,14 @@ def EKF(x0, P0, dT, T, Qtrue, Rtrue, ydata, Q_EKF = np.eye(2)*1e-10, plot=False)
 
     # initialize at t=0
     P_plus = P0
-    x_hat_plus = np.random.multivariate_normal(x0, P_plus)
+    #print(x0, type(x0), x0[0])
+    #x0 = [x0[0][0], x0[1][0], x0[2][0], x0[3][0]]
+    x_hat_plus = np.random.multivariate_normal(mean=[x0[0][0], x0[1][0], x0[2][0], x0[3][0]], cov=P_plus)
     du = np.zeros((2,1))
 
     F_tilde, G_tilde, Omega_tilde, H_tilde_all = eulerized_dt_jacobians(x0, x0, dT, 0)
     
-    x_hat_plus_tot   = x_hat_plus       # ie nominal + perturb
+    x_hat_plus_tot   = x_hat_plus.reshape((4,1))       # ie nominal + perturb
     vis_station_list = []
     P_list           = [P_plus]
     t_list           = [0]
@@ -927,7 +930,7 @@ def EKF(x0, P0, dT, T, Qtrue, Rtrue, ydata, Q_EKF = np.eye(2)*1e-10, plot=False)
     for t in range(dT,T,dT):
 
         # TIME UPDATE/PREDICTION STEP FOR TIME k+1
-        x_hat_ivp   = solve_ivp(dyn_sys, [0, dT], np.asarray(x_hat_plus).flatten(), t_eval=[dT], args=(Qtrue,), method='RK45', rtol=1e-5)
+        x_hat_ivp   = solve_ivp(dyn_sys, [0, dT], np.asarray(x_hat_plus).flatten(), t_eval=[dT], method='RK45', rtol=1e-12)
         x_hat_minus = x_hat_ivp.y[:,0].reshape((4,1))
         #import pdb; pdb.set_trace()
         P_minus     = (F_tilde@P_plus@(F_tilde.T)) + (Omega_tilde@Q_EKF@(Omega_tilde.T))
@@ -1132,7 +1135,7 @@ if __name__ == "__main__":
     
     # Monte-Carlo parameters
     # np.random.seed(100)  # Random Set Seed
-    num_mc_runs = 30     # Number of Monte-Carlo Runs
+    num_mc_runs = 10     # Number of Monte-Carlo Runs
     alpha = 0.05         # Confidence
     
     T_tot = round(np.sqrt((4*(np.pi**2)*(r0**3))/mu))   # orbital period, s
@@ -1171,36 +1174,55 @@ if __name__ == "__main__":
     # KF Tunings
     Q_LKF = np.diag([1e-6,1e-6])
     P0_LKF = np.diag([1e-1,1e-2,1e-1,1e-2])
-    Q_EKF = np.eye(2) * 1e-8
+    Q_EKF = np.eye(2) * 1e-6
     P0_EKF = np.diag([10,0.1,10,0.1])
     
     start = time()
-    NEES_array = []
-    NIS_array = []
-    
-    for i in range(num_mc_runs):
-        if i == 0:
-            plot_arg = True
-        else:
-            plot_arg = False
-        res_lkf = LKF(x0, P0_LKF, dT, T, Qtrue, Rtrue, ydata_sim, Q_LKF=Q_LKF, plot=plot_arg)#, plot=True)
-        NEES_array.append(res_lkf[3])
-        NIS_array.append(res_lkf[4])
-    print("LKF elapsed:", time() - start)
-        
-    nis_lkf, stat_nis_lkf = NIS_Chi2_Test(np.asarray(NIS_array).T, num_meas, num_mc_runs, alpha, title="LKF NIS Testing")    
-    NEES_Chi2_Test(np.asarray(NEES_array).T, num_states, num_mc_runs, alpha, title="LKF NEES Testing")
-    
-    print(stat_nis_lkf)
-    
     # NEES_array = []
     # NIS_array = []
     
     # for i in range(num_mc_runs):
-        # res_ekf = EKF(x0, P0_EKF, dT, T, Qtrue, Rtrue, ydata_sim, Q_EKF = Q_EKF)
-        # NEES_array.append(res_ekf[3])
-        # NIS_array.append(res_ekf[4])
-    # print("EKF elapsed:", time() - start)
+    #     if i == 0:
+    #         plot_arg = True
+    #     else:
+    #         plot_arg = False
+    #     res_lkf = LKF(x0, P0_LKF, dT, T, Qtrue, Rtrue, ydata_sim, Q_LKF=Q_LKF, plot=plot_arg)#, plot=True)
+    #     NEES_array.append(res_lkf[3])
+    #     NIS_array.append(res_lkf[4])
+    # print("LKF elapsed:", time() - start)
         
-    # NIS_Chi2_Test(np.asarray(NIS_array).T, num_meas, num_mc_runs, alpha, title="EKF NIS Testing")    
-    # NEES_Chi2_Test(np.asarray(NEES_array).T, num_states, num_mc_runs, alpha, title="EKF NEES Testing")
+    # nis_lkf, stat_nis_lkf = NIS_Chi2_Test(np.asarray(NIS_array).T, num_meas, num_mc_runs, alpha, title="LKF NIS Testing")    
+    # NEES_Chi2_Test(np.asarray(NEES_array).T, num_states, num_mc_runs, alpha, title="LKF NEES Testing")
+    
+    # print(stat_nis_lkf)
+    
+    def run_ekf(Q_EKF):
+        NEES_array = []
+        NIS_array = []
+
+        try:
+            Q_EKF = Q_EKF.reshape((2,2))
+        except:
+            pass
+    
+        
+        for i in range(num_mc_runs):
+            res_ekf = EKF(x0, P0_EKF, dT, T, Qtrue, Rtrue, ydata_sim, Q_EKF = Q_EKF)
+            NEES_array.append(res_ekf[3])
+            NIS_array.append(res_ekf[4])
+        print("EKF elapsed:", time() - start)
+            
+        NIS_avg, res = NIS_Chi2_Test(np.asarray(NIS_array).T, num_meas, num_mc_runs, alpha, title="EKF NIS Testing")    
+        NEES_avg, res = NEES_Chi2_Test(np.asarray(NEES_array).T, num_states, num_mc_runs, alpha, title="EKF NEES Testing")
+
+        return -1 *np.average(NIS_avg)
+
+    #Q_EKF = np.eye(2) * 1e-6
+    Q_EKF = np.array([[1e-6, 1e-8], [1e-8, 1e-6]])
+    P0_EKF = np.diag([10,0.1,10,0.1])
+    #run_ekf(Q_EKF)
+    bounds = [(1e-8, 1e-5)]*Q_EKF.size
+    result = minimize(run_ekf, Q_EKF.flatten(), method='L-BFGS-B', bounds=bounds)
+
+
+    print(result)

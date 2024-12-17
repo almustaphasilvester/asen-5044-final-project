@@ -29,7 +29,7 @@ def NEES(x_truth, x_est_post, P_post):
     
     return NEES
 
-def NEES_Chi2_Test(NEES_array, num_states, num_runs, alpha, title="NEES Testing"):
+def NEES_Chi2_Test(NEES_array, num_states, num_runs, alpha, title="NEES Testing", plot=False):
     
     # k: number of timesteps
     # r: number of monte carlo runs
@@ -59,18 +59,19 @@ def NEES_Chi2_Test(NEES_array, num_states, num_runs, alpha, title="NEES Testing"
     except:
         res = None
     
-    timesteps = np.arange(0,k)
-    ax = plt.subplot()
-    ax.plot(timesteps, NEES_avg, color='b', linestyle='', marker='o', fillstyle = 'none')
-    ax.plot(timesteps, r1 * np.ones(np.shape(timesteps)), color="g")
-    ax.plot(timesteps, r2 * np.ones(np.shape(timesteps)), color="g")
-    ax.set_title(title)
-    ax.set_xlabel('Timesteps, k')
-    ax.set_ylabel('NEES Statistic')
+    if plot:
+        timesteps = np.arange(0,k)
+        ax = plt.subplot()
+        ax.plot(timesteps, NEES_avg, color='b', linestyle='', marker='o', fillstyle = 'none')
+        ax.plot(timesteps, r1 * np.ones(np.shape(timesteps)), color="g")
+        ax.plot(timesteps, r2 * np.ones(np.shape(timesteps)), color="g")
+        ax.set_title(title)
+        ax.set_xlabel('Timesteps, k')
+        ax.set_ylabel('NEES Statistic')
 
-    plt.tight_layout()
-    plt.savefig(title + ".png")
-    plt.show()
+        plt.tight_layout()
+        plt.savefig(title + ".png")
+        plt.show()
     
     return NEES_avg, res
     
@@ -94,7 +95,7 @@ def NIS(y_real, y_sim, S_k):
     
     return NIS
 
-def NIS_Chi2_Test(NIS_array, num_meas, num_runs, alpha, title="NIS Testing"):
+def NIS_Chi2_Test(NIS_array, num_meas, num_runs, alpha, title="NIS Testing", plot=False):
     
     # k: number of timesteps
     # r: number of monte carlo runs
@@ -125,17 +126,18 @@ def NIS_Chi2_Test(NIS_array, num_meas, num_runs, alpha, title="NIS Testing"):
     except:
         res = None
     
-    timesteps = np.arange(0,k)
-    ax = plt.subplot()
-    ax.plot(timesteps, NIS_avg, color='b', linestyle='', marker='o', fillstyle = 'none')
-    ax.plot(timesteps, r1 * np.ones(np.shape(timesteps)), color="g")
-    ax.plot(timesteps, r2 * np.ones(np.shape(timesteps)), color="g")
-    ax.set_title(title)
-    ax.set_xlabel('Timesteps, k')
-    ax.set_ylabel('NIS Statistic')
+    if plot:
+        timesteps = np.arange(0,k)
+        ax = plt.subplot()
+        ax.plot(timesteps, NIS_avg, color='b', linestyle='', marker='o', fillstyle = 'none')
+        ax.plot(timesteps, r1 * np.ones(np.shape(timesteps)), color="g")
+        ax.plot(timesteps, r2 * np.ones(np.shape(timesteps)), color="g")
+        ax.set_title(title)
+        ax.set_xlabel('Timesteps, k')
+        ax.set_ylabel('NIS Statistic')
 
-    plt.tight_layout()
-    plt.savefig(title + ".png")
-    plt.show()
-    
+        plt.tight_layout()
+        plt.savefig(title + ".png")
+        plt.show()
+        
     return NIS_avg, res
