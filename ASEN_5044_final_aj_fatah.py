@@ -691,7 +691,7 @@ def LKF(x0, P0, dT, T, Qtrue, Rtrue, ydata, Q_LKF = np.eye(2)*1e-10, plot=False)
                 station_state = [Xi, Xidot, Yi, Yidot]
                 
                 # nominal sensor measurement at time k+1
-                state = [x, xdot, y, ydot]
+                state = x_nom.flatten()
                 rho, rho_dot, phi = dyn_measurements(state, station_state)
                 ystar_id = np.array([[rho],[rho_dot],[phi]])
                 if ystar.size == 0:
@@ -1128,7 +1128,7 @@ if __name__ == "__main__":
     
     # Monte-Carlo parameters
     np.random.seed(100)  # Random Set Seed
-    num_mc_runs = 20     # Number of Monte-Carlo Runs
+    num_mc_runs = 30     # Number of Monte-Carlo Runs
     alpha = 0.05         # Confidence
     
     T_tot = round(np.sqrt((4*(np.pi**2)*(r0**3))/mu))   # orbital period, s
@@ -1165,10 +1165,10 @@ if __name__ == "__main__":
     ydata_sim = monte_carlo_measurements_tmt(x0,Qtrue,Rtrue,T,plot=False)
     
     # KF Tunings
-    Q_LKF = np.eye(2) * 1e-6
-    P0_LKF = np.diag([0.01,0.001,0.01,0.001])
+    Q_LKF = np.diag([1e+4,1e+1])
+    P0_LKF = np.diag([100,1,100,1])
     Q_EKF = np.eye(2) * 1e-8
-    P0_EKF = np.diag([0.01,0.01,0.01,0.01])
+    P0_EKF = np.diag([10,0.1,10,0.1])
     
     start = time()
     NEES_array = []
@@ -1180,17 +1180,19 @@ if __name__ == "__main__":
         NIS_array.append(res_lkf[4])
     print("LKF elapsed:", time() - start)
         
-    NIS_Chi2_Test(np.asarray(NIS_array).T, num_meas, num_mc_runs, alpha, title="LKF NIS Testing")    
+    nis_lkf, stat_lkf = NIS_Chi2_Test(np.asarray(NIS_array).T, num_meas, num_mc_runs, alpha, title="LKF NIS Testing")    
     NEES_Chi2_Test(np.asarray(NEES_array).T, num_states, num_mc_runs, alpha, title="LKF NEES Testing")
     
-    NEES_array = []
-    NIS_array = []
+    print(stat_lkf)
     
-    for i in range(num_mc_runs):
-        res_ekf = EKF(x0, P0_EKF, dT, T, Qtrue, Rtrue, ydata_sim, Q_EKF = Q_EKF)
-        NEES_array.append(res_ekf[3])
-        NIS_array.append(res_ekf[4])
-    print("EKF elapsed:", time() - start)
+    # NEES_array = []
+    # NIS_array = []
+    
+    # for i in range(num_mc_runs):
+        # res_ekf = EKF(x0, P0_EKF, dT, T, Qtrue, Rtrue, ydata_sim, Q_EKF = Q_EKF)
+        # NEES_array.append(res_ekf[3])
+        # NIS_array.append(res_ekf[4])
+    # print("EKF elapsed:", time() - start)
         
-    NIS_Chi2_Test(np.asarray(NIS_array).T, num_meas, num_mc_runs, alpha, title="EKF NIS Testing")    
-    NEES_Chi2_Test(np.asarray(NEES_array).T, num_states, num_mc_runs, alpha, title="EKF NEES Testing")
+    # NIS_Chi2_Test(np.asarray(NIS_array).T, num_meas, num_mc_runs, alpha, title="EKF NIS Testing")    
+    # NEES_Chi2_Test(np.asarray(NEES_array).T, num_states, num_mc_runs, alpha, title="EKF NEES Testing")
