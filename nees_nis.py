@@ -91,6 +91,8 @@ def NIS(y_real, y_sim, S_k):
     # Run this at every k time and store NIS into an array, one column array per monte carlo run
     
     innov_error = y_real.flatten() - y_sim.flatten()
+    print(innov_error)
+    print(S_k)
     NIS = innov_error.T @ np.linalg.inv(S_k) @ innov_error
     
     return NIS
