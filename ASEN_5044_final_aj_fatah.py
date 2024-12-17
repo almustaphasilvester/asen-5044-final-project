@@ -447,8 +447,8 @@ def dt_linearized_measurements_sim(x0, dT, T):
 # PART 2 ----------------------------------------------------------------------------------
 def monte_carlo_states_tmt(x0,Qtrue,T,plot=False):
     t_eval = np.linspace(0, T, int(T/10))
-    noisy_soln = solve_ivp(dyn_sys, [0, T], np.asarray(x0).flatten(), t_eval=t_eval, method='RK45',args=(Qtrue,), rtol=1e-5)
-    soln = solve_ivp(dyn_sys, [0, T], np.asarray(x0).flatten(), t_eval=t_eval, method='RK45', rtol=1e-5)
+    noisy_soln = solve_ivp(dyn_sys, [0, T], np.asarray(x0).flatten(), t_eval=t_eval, method='RK45',args=(Qtrue,), rtol=1e-12)
+    soln = solve_ivp(dyn_sys, [0, T], np.asarray(x0).flatten(), t_eval=t_eval, method='RK45', rtol=1e-12)
 
     # sanity check plots
     # Plot the results
@@ -487,12 +487,12 @@ def monte_carlo_states_tmt(x0,Qtrue,T,plot=False):
         plt.show()
         plt.close()
 
-    return noisy_soln
+    return noisy_soln, soln
 
 def monte_carlo_measurements_tmt(x0,Qtrue,Rtrue,T,plot=False):
     # validate using scipy.integrate.solve_ivp
     t_eval = np.linspace(0, T, int(T/10))
-    noisy_soln = solve_ivp(dyn_sys, [0, T], np.asarray(x0).flatten(), t_eval=t_eval, method='RK45',args=(Qtrue,), rtol=1e-5)
+    noisy_soln = solve_ivp(dyn_sys, [0, T], np.asarray(x0).flatten(), t_eval=t_eval, method='RK45',args=(Qtrue,), rtol=1e-12)
 
     if plot:
         colors = [
@@ -645,19 +645,23 @@ def LKF(x0, P0, dT, T, Qtrue, Rtrue, ydata, Q_LKF = np.eye(2)*1e-10, plot=False)
     NIS_list         = []
 
     # ground truth values
-    xstar = monte_carlo_states_tmt(x0,Qtrue,T,False)
+    xstar, x_nom = monte_carlo_states_tmt(x0,Qtrue,T,False)
 
     t_idx = 1
     for t in range(dT,T,dT):
         # calculate nominal orbit at time k+1
-        x, xdot, y, ydot = nominal_orbit(t)
-        x_nom = np.array([[x],[xdot],[y],[ydot]])
+        # x, xdot, y, ydot = nominal_orbit(t)
+        x_nom_t = xstar.y[:,t_idx]
+        x_nom = np.array([[x_nom_t[0]],[x_nom_t[1]],[x_nom_t[2]],[x_nom_t[3]]])
 
         # TIME UPDATE/PREDICTION STEP FOR TIME k+1
         dx_hat_minus = F_tilde@dx_hat_plus + G_tilde@du
         P_minus      = (F_tilde@P_plus@(F_tilde.T)) + (Omega_tilde@Q_LKF@(Omega_tilde.T))
 
         # MEASUREMENT UPDATE/CORRECTION STEP FOR TIME k+1
+        # FOR NEXT TIMESTEP, calculate new F_tilde, G_tilde, Omega_tilde, H_tilde_all
+        F_tilde, G_tilde, Omega_tilde, H_tilde_all = eulerized_dt_jacobians(x_nom, dT, t)
+
         # actual received sensor measurement
         y_full_vect = ydata[t_idx]
         if y_full_vect.size != 0:
@@ -743,8 +747,8 @@ def LKF(x0, P0, dT, T, Qtrue, Rtrue, ydata, Q_LKF = np.eye(2)*1e-10, plot=False)
 
         t_list.append(t)
         
-        # FOR NEXT TIMESTEP, calculate new F_tilde, G_tilde, Omega_tilde, H_tilde_all
-        F_tilde, G_tilde, Omega_tilde, H_tilde_all = eulerized_dt_jacobians(x_nom, dT, t)
+        # # FOR NEXT TIMESTEP, calculate new F_tilde, G_tilde, Omega_tilde, H_tilde_all
+        # F_tilde, G_tilde, Omega_tilde, H_tilde_all = eulerized_dt_jacobians(x_nom, dT, t)
         
         # NEES Calculation
         NEES_list.append(NEES(xstar.y[:,t_idx], x_hat_plus, P_plus))
@@ -915,7 +919,7 @@ def EKF(x0, P0, dT, T, Qtrue, Rtrue, ydata, Q_EKF = np.eye(2)*1e-10, plot=False)
     NIS_list         = []
 
     # ground truth values
-    xstar = monte_carlo_states_tmt(x0,Qtrue,T,False)
+    xstar, dum = monte_carlo_states_tmt(x0,Qtrue,T,False)
     
     t_eval = np.linspace(0, T, int(T/10))
 
@@ -1165,8 +1169,8 @@ if __name__ == "__main__":
     ydata_sim = monte_carlo_measurements_tmt(x0,Qtrue,Rtrue,T,plot=False)
     
     # KF Tunings
-    Q_LKF = np.diag([1e+2,1e+2])
-    P0_LKF = np.diag([1e+3,1e+3,1e+3,1e+3])
+    Q_LKF = np.diag([1e-6,1e-6])
+    P0_LKF = np.diag([1e-1,1e-2,1e-1,1e-2])
     Q_EKF = np.eye(2) * 1e-8
     P0_EKF = np.diag([10,0.1,10,0.1])
     
@@ -1175,7 +1179,11 @@ if __name__ == "__main__":
     NIS_array = []
     
     for i in range(num_mc_runs):
-        res_lkf = LKF(x0, P0_LKF, dT, T, Qtrue, Rtrue, ydata_sim, Q_LKF = Q_LKF)#, plot=True)
+        if i == 0:
+            plot_arg = True
+        else:
+            plot_arg = False
+        res_lkf = LKF(x0, P0_LKF, dT, T, Qtrue, Rtrue, ydata_sim, Q_LKF=Q_LKF, plot=plot_arg)#, plot=True)
         NEES_array.append(res_lkf[3])
         NIS_array.append(res_lkf[4])
     print("LKF elapsed:", time() - start)
