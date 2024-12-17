@@ -631,7 +631,7 @@ def LKF(x0, P0, dT, T, Qtrue, Rtrue, ydata, Q_LKF = np.eye(2)*1e-10, plot=False)
     # initialize at t=0
     x_hat_plus = np.array(x0)
     P_plus = P0
-    dx0 = [68,0.075,68,-0.075]
+    dx0 = [2,0.075,2,-0.075]
     dx_hat_vals = np.random.multivariate_normal(dx0, P_plus)
     dx_hat_plus = np.array([[dx_hat_vals[0]],[dx_hat_vals[1]],[dx_hat_vals[2]],[dx_hat_vals[3]]])
     du = np.zeros((2,1))
@@ -911,12 +911,13 @@ def EKF(x0, P0, dT, T, Qtrue, Rtrue, ydata, Q_EKF = np.eye(2)*1e-10, plot=False)
     P_plus = P0
     #print(x0, type(x0), x0[0])
     #x0 = [x0[0][0], x0[1][0], x0[2][0], x0[3][0]]
-    x_hat_plus = np.random.multivariate_normal(mean=[x0[0][0], x0[1][0], x0[2][0], x0[3][0]], cov=P_plus)
+    x_hat_plus = np.random.multivariate_normal(mean=[x0[0][0], x0[1][0], x0[2][0], x0[3][0]], cov=P_plus).reshape((4,1))
     du = np.zeros((2,1))
 
     F_tilde, G_tilde, Omega_tilde, H_tilde_all = eulerized_dt_jacobians(x0, x0, dT, 0)
+    Q = Q_EKF
     
-    x_hat_plus_tot   = x_hat_plus.reshape((4,1))       # ie nominal + perturb
+    x_hat_plus_tot   = x_hat_plus       # ie nominal + perturb
     vis_station_list = []
     P_list           = [P_plus]
     t_list           = [0]
@@ -934,13 +935,19 @@ def EKF(x0, P0, dT, T, Qtrue, Rtrue, ydata, Q_EKF = np.eye(2)*1e-10, plot=False)
         # TIME UPDATE/PREDICTION STEP FOR TIME k+1
         x_hat_ivp   = solve_ivp(dyn_sys, [0, dT], np.asarray(x_hat_plus).flatten(), t_eval=[dT], method='RK45', rtol=1e-12)
         x_hat_minus = x_hat_ivp.y[:,0].reshape((4,1))
+        
+        # FOR NEXT TIMESTEP, calculate new F_tilde, G_tilde, Omega_tilde, H_tilde_all
+        F_tilde, G_tilde, Omega_tilde, H_tilde_all = eulerized_dt_jacobians(x_hat_minus, x_hat_plus, dT, t)
+        
         #import pdb; pdb.set_trace()
-        P_minus     = (F_tilde@P_plus@(F_tilde.T)) + (Omega_tilde@Q_EKF@(Omega_tilde.T))
+        P_minus     = (F_tilde@P_plus@(F_tilde.T)) + (Omega_tilde@Q@(Omega_tilde.T))
+
 
         # MEASUREMENT UPDATE/CORRECTION STEP FOR TIME k+1
         # actual received sensor measurement
         y_full_vect = ydata[t_idx]
         if y_full_vect.size != 0:
+            Q = Q_EKF
             visible_stations = y_full_vect[3,:]
             H_tilde = np.array([])
             yk1     = np.array([])
@@ -1013,15 +1020,13 @@ def EKF(x0, P0, dT, T, Qtrue, Rtrue, ydata, Q_EKF = np.eye(2)*1e-10, plot=False)
             
             # NIS Calculation
             NIS_list.append(np.nan)
+            
+            Q = 1e+3 * Q_EKF
         
         x_hat_plus_tot  = np.concatenate((x_hat_plus_tot, np.array(x_hat_plus)), axis=1)
         P_list.append(P_plus)
 
         t_list.append(t)
-        
-        
-        # FOR NEXT TIMESTEP, calculate new F_tilde, G_tilde, Omega_tilde, H_tilde_all
-        F_tilde, G_tilde, Omega_tilde, H_tilde_all = eulerized_dt_jacobians(x_hat_minus, x_hat_plus, dT, t)
         
         # NEES Calculation
         NEES_list.append(NEES(xstar.y[:,t_idx], x_hat_plus, P_plus))
@@ -1181,20 +1186,20 @@ if __name__ == "__main__":
     NEES_array = []
     NIS_array = []
 
-    for i in range(num_mc_runs):
-        if i == 0:
-            plot_arg = True
-        else:
-            plot_arg = False
-        res_lkf = LKF(x0, P0_LKF, dT, T, Qtrue, Rtrue, ydata_sim, Q_LKF=Q_LKF, plot=plot_arg)#, plot=True)
-        NEES_array.append(res_lkf[3])
-        NIS_array.append(res_lkf[4])
-    print("LKF elapsed:", time() - start)
+    # for i in range(num_mc_runs):
+        # if i == 0:
+            # plot_arg = True
+        # else:
+            # plot_arg = False
+        # res_lkf = LKF(x0, P0_LKF, dT, T, Qtrue, Rtrue, ydata_sim, Q_LKF=Q_LKF, plot=plot_arg)#, plot=True)
+        # NEES_array.append(res_lkf[3])
+        # NIS_array.append(res_lkf[4])
+    # print("LKF elapsed:", time() - start)
         
-    nis_lkf, stat_nis_lkf = NIS_Chi2_Test(np.asarray(NIS_array).T, num_meas, num_mc_runs, alpha, title="LKF NIS Testing")    
-    NEES_Chi2_Test(np.asarray(NEES_array).T, num_states, num_mc_runs, alpha, title="LKF NEES Testing")
+    # nis_lkf, stat_nis_lkf = NIS_Chi2_Test(np.asarray(NIS_array).T, num_meas, num_mc_runs, alpha, title="LKF NIS Testing")    
+    # NEES_Chi2_Test(np.asarray(NEES_array).T, num_states, num_mc_runs, alpha, title="LKF NEES Testing")
     
-    print(stat_nis_lkf)
+    # print(stat_nis_lkf)
     
     def run_ekf(Q_EKF):
         NEES_array = []
@@ -1207,7 +1212,11 @@ if __name__ == "__main__":
     
         
         for i in range(num_mc_runs):
-            res_ekf = EKF(x0, P0_EKF, dT, T, Qtrue, Rtrue, ydata_sim, Q_EKF = Q_EKF)
+            if i == 0:
+                plot_arg = True
+            else:
+                plot_arg = False
+            res_ekf = EKF(x0, P0_EKF, dT, T, Qtrue, Rtrue, ydata_sim, Q_EKF = Q_EKF, plot=plot_arg)
             NEES_array.append(res_ekf[3])
             NIS_array.append(res_ekf[4])
         print("EKF elapsed:", time() - start)
@@ -1217,12 +1226,12 @@ if __name__ == "__main__":
 
         return -1 *np.average(NIS_avg)
 
-    #Q_EKF = np.eye(2) * 1e-6
-    Q_EKF = np.array([[1e-6, 1e-8], [1e-8, 1e-6]])
+    Q_EKF = np.eye(2) * 1e-3
+    #Q_EKF = np.array([[1e-6, 1e-8], [1e-8, 1e-6]])
     P0_EKF = np.diag([10,0.1,10,0.1])
-    #run_ekf(Q_EKF)
+    run_ekf(Q_EKF)
     bounds = [(1e-8, 1e-5)]*Q_EKF.size
-    result = minimize(run_ekf, Q_EKF.flatten(), method='L-BFGS-B', bounds=bounds)
+    #result = minimize(run_ekf, Q_EKF.flatten(), method='L-BFGS-B', bounds=bounds)
 
 
-    print(result)
+    #print(result)
