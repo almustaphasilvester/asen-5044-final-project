@@ -582,7 +582,7 @@ def monte_carlo_measurements_tmt(x0,Qtrue,Rtrue,T,plot=False):
 
     return y_soln
 
-def LKF(x0, dT, T, Qtrue, Rtrue, ydata, Q_LKF = np.eye(2)*1e-10, plot=False):
+def LKF(x0, P0, dT, T, Qtrue, Rtrue, ydata, Q_LKF = np.eye(2)*1e-10, plot=False):
     """
     Implement and tune a linearized KF using the specified nominal state trajectory
     """
@@ -631,11 +631,9 @@ def LKF(x0, dT, T, Qtrue, Rtrue, ydata, Q_LKF = np.eye(2)*1e-10, plot=False):
     x_hat_plus = np.array(x0)
     dx_hat_plus = np.array([[0],[0.075],[0],[-0.021]])
     du = np.zeros((2,1))
+    P_plus = P0
 
     F_tilde, G_tilde, Omega_tilde, H_tilde_all = eulerized_dt_jacobians(x0, dT, 0)
-    
-    # LKF TUNING
-    P_plus = np.diag([0.01,0.001,0.01,0.001])
     
     x_hat_plus_tot   = x_hat_plus + dx_hat_plus       # ie nominal + perturb
     vis_station_list = []
@@ -651,7 +649,7 @@ def LKF(x0, dT, T, Qtrue, Rtrue, ydata, Q_LKF = np.eye(2)*1e-10, plot=False):
     for t in range(dT,T,dT):
         # calculate nominal orbit at time k+1
         x, xdot, y, ydot = nominal_orbit(t)
-        x_nom = [[x],[xdot],[y],[ydot]]
+        x_nom = np.array([[x],[xdot],[y],[ydot]])
 
         # TIME UPDATE/PREDICTION STEP FOR TIME k+1
         dx_hat_minus = F_tilde@dx_hat_plus + G_tilde@du
@@ -723,17 +721,25 @@ def LKF(x0, dT, T, Qtrue, Rtrue, ydata, Q_LKF = np.eye(2)*1e-10, plot=False):
 
             # ADD TO NOMINAL STATE ESTIMATE
             x_hat_plus = x_nom + dx_hat_plus
-
-            x_hat_plus_tot  = np.concatenate((x_hat_plus_tot, np.array(x_hat_plus)), axis=1)
-            P_list.append(P_plus)
-
-            t_list.append(t)
             
             # NIS Calculation
             NIS_list.append(NIS(yk1, ystar, S_k))
         
-        else: # NIS Calculation
+        else: 
+            
+            # Covariance Matrix
+            P_plus = P_minus
+
+            # state estimate
+            x_hat_plus = x_nom
+            
+            # NIS Calculation
             NIS_list.append(np.nan)
+        
+        x_hat_plus_tot  = np.concatenate((x_hat_plus_tot, np.array(x_hat_plus)), axis=1)
+        P_list.append(P_plus)
+
+        t_list.append(t)
         
         # FOR NEXT TIMESTEP, calculate new F_tilde, G_tilde, Omega_tilde, H_tilde_all
         F_tilde, G_tilde, Omega_tilde, H_tilde_all = eulerized_dt_jacobians(x_nom, dT, t)
@@ -841,7 +847,7 @@ def LKF(x0, dT, T, Qtrue, Rtrue, ydata, Q_LKF = np.eye(2)*1e-10, plot=False):
     
     return x_hat_plus_tot, est_errors, P_list, NEES_list, NIS_list
 
-def EKF(x0, dT, T, Qtrue, Rtrue, ydata, Q_EKF = np.eye(2)*1e-10, plot=False):
+def EKF(x0, P0, dT, T, Qtrue, Rtrue, ydata, Q_EKF = np.eye(2)*1e-10, plot=False):
     """
     Implement and tune an extended KF using the specified nominal state trajectory
     """
@@ -896,11 +902,9 @@ def EKF(x0, dT, T, Qtrue, Rtrue, ydata, Q_EKF = np.eye(2)*1e-10, plot=False):
     x_hat_plus = np.array(x0)
     dx_hat_plus = np.array([[0],[0.075],[0],[-0.021]])
     du = np.zeros((2,1))
+    P_plus = P0
 
     F_tilde, G_tilde, Omega_tilde, H_tilde_all = eulerized_dt_jacobians(x0, x0, dT, 0)
-    
-    # EKF TUNING
-    P_plus = np.diag([0.01,0.01,0.01,0.01])
     
     x_hat_plus_tot   = x_hat_plus + dx_hat_plus       # ie nominal + perturb
     vis_station_list = []
@@ -1162,70 +1166,31 @@ if __name__ == "__main__":
     
     # KF Tunings
     Q_LKF = np.eye(2) * 1e-6
+    P0_LKF = np.diag([0.01,0.001,0.01,0.001])
     Q_EKF = np.eye(2) * 1e-8
+    P0_EKF = np.diag([0.01,0.01,0.01,0.01])
     
     start = time()
-    # NEES_array = []
-    # NIS_array = []
+    NEES_array = []
+    NIS_array = []
     
-    # for i in range(num_mc_runs):
-        # res_lkf = LKF(x0, dT, T, Qtrue, Rtrue, ydata_sim, Q_LKF = Q_LKF)
-        # NEES_array.append(res_lkf[3])
-        # NIS_array.append(res_lkf[4])
-    # print(time() - start)
+    for i in range(num_mc_runs):
+        res_lkf = LKF(x0, P0_LKF, dT, T, Qtrue, Rtrue, ydata_sim, Q_LKF = Q_LKF)
+        NEES_array.append(res_lkf[3])
+        NIS_array.append(res_lkf[4])
+    print("LKF elapsed:", time() - start)
         
-    # NIS_Chi2_Test(np.asarray(NIS_array).T, num_meas, num_mc_runs, alpha)    
-    # NEES_Chi2_Test(np.asarray(NEES_array).T, num_states, num_mc_runs, alpha)
+    NIS_Chi2_Test(np.asarray(NIS_array).T, num_meas, num_mc_runs, alpha, title="LKF NIS Testing")    
+    NEES_Chi2_Test(np.asarray(NEES_array).T, num_states, num_mc_runs, alpha, title="LKF NEES Testing")
     
     NEES_array = []
     NIS_array = []
     
     for i in range(num_mc_runs):
-        res_ekf = EKF(x0, dT, T, Qtrue, Rtrue, ydata_sim, Q_EKF = Q_EKF)
+        res_ekf = EKF(x0, P0_EKF, dT, T, Qtrue, Rtrue, ydata_sim, Q_EKF = Q_EKF)
         NEES_array.append(res_ekf[3])
         NIS_array.append(res_ekf[4])
-    print(time() - start)
+    print("EKF elapsed:", time() - start)
         
-    NIS_Chi2_Test(np.asarray(NIS_array).T, num_meas, num_mc_runs, alpha)    
-    NEES_Chi2_Test(np.asarray(NEES_array).T, num_states, num_mc_runs, alpha)
-
-    # # Run Simulation
-    # est_x, est_P = ekf_simulation(14000, 10, x0)
-
-    # diff = est_x.reshape((1400,4)).T - res_ekf[0]
-    # import pdb; pdb.set_trace()
-    
-    # # Plot estimated states over time
-    # fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(15,10))
-    # time = np.arange(0, 14000, 10)  # Create time array from 0 to 14000s with 10s steps
-    
-    # # Plot x position
-    # ax1.plot(time, diff[0])
-    # ax1.set_xlabel('Time (seconds)')
-    # ax1.set_ylabel('Estimated X Position (km)')
-    # ax1.set_title('EKF Estimated X Position vs Time')
-    # ax1.grid(True)
-
-    # # Plot x velocity 
-    # ax2.plot(time, diff[1])
-    # ax2.set_xlabel('Time (seconds)')
-    # ax2.set_ylabel('Estimated X Velocity (km/s)')
-    # ax2.set_title('EKF Estimated X Velocity vs Time')
-    # ax2.grid(True)
-
-    # # Plot y position
-    # ax3.plot(time, diff[2])
-    # ax3.set_xlabel('Time (seconds)')
-    # ax3.set_ylabel('Estimated Y Position (km)')
-    # ax3.set_title('EKF Estimated Y Position vs Time')
-    # ax3.grid(True)
-
-    # # Plot y velocity
-    # ax4.plot(time, diff[3])
-    # ax4.set_xlabel('Time (seconds)')
-    # ax4.set_ylabel('Estimated Y Velocity (km/s)')
-    # ax4.set_title('EKF Estimated Y Velocity vs Time')
-    # ax4.grid(True)
-    
-    # plt.tight_layout()
-    # plt.show()
+    NIS_Chi2_Test(np.asarray(NIS_array).T, num_meas, num_mc_runs, alpha, title="EKF NIS Testing")    
+    NEES_Chi2_Test(np.asarray(NEES_array).T, num_states, num_mc_runs, alpha, title="EKF NEES Testing")
