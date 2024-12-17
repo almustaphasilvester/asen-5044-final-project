@@ -629,9 +629,11 @@ def LKF(x0, P0, dT, T, Qtrue, Rtrue, ydata, Q_LKF = np.eye(2)*1e-10, plot=False)
 
     # initialize at t=0
     x_hat_plus = np.array(x0)
-    dx_hat_plus = np.array([[0],[0.075],[0],[-0.021]])
-    du = np.zeros((2,1))
     P_plus = P0
+    dx0 = [0,0.075,0,-0.021]
+    dx_hat_vals = np.random.multivariate_normal(dx0, P_plus)
+    dx_hat_plus = np.array([[dx_hat_vals[0]],[dx_hat_vals[1]],[dx_hat_vals[2]],[dx_hat_vals[3]]])
+    du = np.zeros((2,1))
 
     F_tilde, G_tilde, Omega_tilde, H_tilde_all = eulerized_dt_jacobians(x0, dT, 0)
     
@@ -745,7 +747,7 @@ def LKF(x0, P0, dT, T, Qtrue, Rtrue, ydata, Q_LKF = np.eye(2)*1e-10, plot=False)
         F_tilde, G_tilde, Omega_tilde, H_tilde_all = eulerized_dt_jacobians(x_nom, dT, t)
         
         # NEES Calculation
-        NEES_list.append(NEES(xstar.y[:,t_idx-1], x_hat_plus, P_plus))
+        NEES_list.append(NEES(xstar.y[:,t_idx], x_hat_plus, P_plus))
         
         # NEES/NIS Debug
         # print("NEES: ", NEES_list[t_idx-1])
@@ -899,14 +901,13 @@ def EKF(x0, P0, dT, T, Qtrue, Rtrue, ydata, Q_EKF = np.eye(2)*1e-10, plot=False)
         return F_tilde, G_tilde, Omega_tilde, H_tilde
 
     # initialize at t=0
-    x_hat_plus = np.array(x0)
-    dx_hat_plus = np.array([[0],[0.075],[0],[-0.021]])
-    du = np.zeros((2,1))
     P_plus = P0
+    x_hat_plus = np.random.multivariate_normal(x0, P_plus)
+    du = np.zeros((2,1))
 
     F_tilde, G_tilde, Omega_tilde, H_tilde_all = eulerized_dt_jacobians(x0, x0, dT, 0)
     
-    x_hat_plus_tot   = x_hat_plus + dx_hat_plus       # ie nominal + perturb
+    x_hat_plus_tot   = x_hat_plus       # ie nominal + perturb
     vis_station_list = []
     P_list           = [P_plus]
     t_list           = [0]
@@ -915,7 +916,6 @@ def EKF(x0, P0, dT, T, Qtrue, Rtrue, ydata, Q_EKF = np.eye(2)*1e-10, plot=False)
 
     # ground truth values
     xstar = monte_carlo_states_tmt(x0,Qtrue,T,False)
-    x_hat_plus = x_hat_plus + dx_hat_plus
     
     t_eval = np.linspace(0, T, int(T/10))
 
@@ -1015,7 +1015,7 @@ def EKF(x0, P0, dT, T, Qtrue, Rtrue, ydata, Q_EKF = np.eye(2)*1e-10, plot=False)
         F_tilde, G_tilde, Omega_tilde, H_tilde_all = eulerized_dt_jacobians(x_hat_minus, x_hat_plus, dT, t)
         
         # NEES Calculation
-        NEES_list.append(NEES(xstar.y[:,t_idx-1], x_hat_plus, P_plus))
+        NEES_list.append(NEES(xstar.y[:,t_idx], x_hat_plus, P_plus))
         
         # NEES/NIS Debug
         # print("NEES: ", NEES_list[t_idx-1])
@@ -1127,7 +1127,7 @@ if __name__ == "__main__":
     T = 14000   # HARD-CODED
     
     # Monte-Carlo parameters
-    np.random.seed(100)  # Random Set Seed
+    # np.random.seed(100)  # Random Set Seed
     num_mc_runs = 30     # Number of Monte-Carlo Runs
     alpha = 0.05         # Confidence
     
@@ -1165,8 +1165,8 @@ if __name__ == "__main__":
     ydata_sim = monte_carlo_measurements_tmt(x0,Qtrue,Rtrue,T,plot=False)
     
     # KF Tunings
-    Q_LKF = np.diag([1e+4,1e+1])
-    P0_LKF = np.diag([100,1,100,1])
+    Q_LKF = np.diag([1e+2,1e+2])
+    P0_LKF = np.diag([1e+3,1e+3,1e+3,1e+3])
     Q_EKF = np.eye(2) * 1e-8
     P0_EKF = np.diag([10,0.1,10,0.1])
     
@@ -1175,15 +1175,15 @@ if __name__ == "__main__":
     NIS_array = []
     
     for i in range(num_mc_runs):
-        res_lkf = LKF(x0, P0_LKF, dT, T, Qtrue, Rtrue, ydata_sim, Q_LKF = Q_LKF)
+        res_lkf = LKF(x0, P0_LKF, dT, T, Qtrue, Rtrue, ydata_sim, Q_LKF = Q_LKF)#, plot=True)
         NEES_array.append(res_lkf[3])
         NIS_array.append(res_lkf[4])
     print("LKF elapsed:", time() - start)
         
-    nis_lkf, stat_lkf = NIS_Chi2_Test(np.asarray(NIS_array).T, num_meas, num_mc_runs, alpha, title="LKF NIS Testing")    
+    nis_lkf, stat_nis_lkf = NIS_Chi2_Test(np.asarray(NIS_array).T, num_meas, num_mc_runs, alpha, title="LKF NIS Testing")    
     NEES_Chi2_Test(np.asarray(NEES_array).T, num_states, num_mc_runs, alpha, title="LKF NEES Testing")
     
-    print(stat_lkf)
+    print(stat_nis_lkf)
     
     # NEES_array = []
     # NIS_array = []

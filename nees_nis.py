@@ -116,10 +116,10 @@ def NIS_Chi2_Test(NIS_array, num_meas, num_runs, alpha, title="NIS Testing"):
     k = np.shape(NIS_array)[0]
     
     NIS_avg = np.nanmean(NIS_array, axis=1)
-    #import pdb; pdb.set_trace()
     NIS_exp = num_meas * np.ones(np.shape(NIS_avg[np.isfinite(NIS_avg)]))
     r1 = chi2.ppf(alpha/2, df=num_runs*num_meas)/num_runs
     r2 = chi2.ppf(1 - (alpha/2), df=num_runs*num_meas)/num_runs
+    #import pdb; pdb.set_trace()
     try:
         res = stats.chisquare(NIS_avg[np.isfinite(NIS_avg)], NIS_exp)
     except:
