@@ -364,7 +364,13 @@ def dt_linearized_measurements_sim(x0, dT, T):
 
             y_tot = y_nom_new + dy
 
-            if (y_tot[2][0] >= el_L_lim) and (y_tot[2][0] <= el_H_lim):
+            site_pos = np.array([tracking_station_data.Xi(t,i),tracking_station_data.Yi(t,i)])
+            sat_pos  = np.array([x, y])
+            rel_pos = sat_pos - site_pos
+            el_mask = np.arccos(np.dot(rel_pos, site_pos)/(np.linalg.norm(rel_pos)*np.linalg.norm(site_pos)))
+
+            if el_mask < 0.5*np.pi:
+            # if (y_tot[2][0] >= el_L_lim) and (y_tot[2][0] <= el_H_lim):
                 vis_list.append(i+1)
             else:
                 y_tot = np.array([[np.nan],[np.nan],[np.nan]])
@@ -1184,8 +1190,8 @@ if __name__ == "__main__":
     tracking_station_data = tracking_stations(RE, omegaE)
 
     # simulate the linearize DT dynamics and measurement models
-    dt_linearized_state_sim(x0,dT,T)
-    dt_linearized_measurements_sim(x0,dT,T)
+    # dt_linearized_state_sim(x0,dT,T)
+    # dt_linearized_measurements_sim(x0,dT,T)
 
     # linearized kalman filter (LKF)
     # input files
