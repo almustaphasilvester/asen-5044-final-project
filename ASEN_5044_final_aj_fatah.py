@@ -39,7 +39,11 @@ class tracking_stations:
         return RE*omegaE*np.cos(omegaE * t + self.theta0(i))
         
     def theta(self, t, i):
-        return omegaE * t + self.theta0(i)
+        theta_ang = self.omegaE * t + self.theta0(i)
+        if theta_ang > 2*np.pi:
+            theta_ang -= 2*np.pi
+        return theta_ang
+
 
 def nominal_orbit(t):
     max_vel = r0*np.sqrt(mu/(r0**3))
@@ -421,7 +425,12 @@ def dt_linearized_measurements_sim(x0, dT, T):
             state  = soln.y[:,t_idx]
             rho, rho_dot, phi = dyn_measurements(state, station_state)
 
-            if (phi >= el_L_lim) and (phi <= el_H_lim):
+            site_pos = np.array([Xi,Yi])
+            sat_pos  = np.array([state[0], state[2]])
+            rel_pos = sat_pos - site_pos
+            el_mask = np.arccos(np.dot(rel_pos, site_pos)/(np.linalg.norm(rel_pos)*np.linalg.norm(site_pos)))
+
+            if el_mask < 0.5*np.pi:
                 y = np.array([[rho],[rho_dot],[phi]])
                 vis_list.append(i+1)
             else:
@@ -544,15 +553,20 @@ def monte_carlo_measurements_tmt(x0,Qtrue,Rtrue,T,plot=False):
 
             # visibility, at time t
             theta    = np.arctan2(Yi,Xi)
-            theta    = tracking_station_data.theta(t, i)
-            el_L_lim = (-0.5*np.pi)+theta
-            el_H_lim = (0.5*np.pi)+theta
+            # theta    = tracking_station_data.theta(t, i)
+            el_L_lim = (-0.5*np.pi) + theta
+            el_H_lim = (0.5*np.pi) + theta
 
             #state = soln.y[:,t_idx]
             state_noisy = noisy_soln.y[:,t_idx]
             rho_noisy, rho_dot_noisy, phi_noisy = dyn_measurements(state_noisy, station_state,Rtrue)
 
-            if (phi_noisy >= el_L_lim) and (phi_noisy <= el_H_lim):
+            site_pos = np.array([Xi,Yi])
+            sat_pos  = np.array([state_noisy[0], state_noisy[2]])
+            rel_pos = sat_pos - site_pos
+            el_mask = np.arccos(np.dot(rel_pos, site_pos)/(np.linalg.norm(rel_pos)*np.linalg.norm(site_pos)))
+
+            if el_mask < 0.5*np.pi:
                 y_noisy = np.array([[rho_noisy],[rho_dot_noisy],[phi_noisy]])
                 vis_list_noisy.append(i+1)
                 if y_soln[t_idx-1].size == 0:
@@ -1170,8 +1184,8 @@ if __name__ == "__main__":
     tracking_station_data = tracking_stations(RE, omegaE)
 
     # simulate the linearize DT dynamics and measurement models
-    #dt_linearized_state_sim(x0,dT,T)
-    #dt_linearized_measurements_sim(x0,dT,T)
+    dt_linearized_state_sim(x0,dT,T)
+    dt_linearized_measurements_sim(x0,dT,T)
 
     # linearized kalman filter (LKF)
     # input files
@@ -1182,10 +1196,9 @@ if __name__ == "__main__":
     measLabels = (pd.read_csv(os.path.join(input_files_dir, 'measLabels.csv'), header=None)).values.tolist()    # labels for measurements dataframe
     ydata = loadmat(os.path.join(input_files_dir,'orbitdeterm_finalproj_KFdata.mat'))['ydata'][0]
 
-    ydata_sim = monte_carlo_measurements_tmt(x0,Qtrue,Rtrue,T,plot=False)
-    print(Rtrue)
+    ydata_sim = monte_carlo_measurements_tmt(x0,Qtrue,Rtrue,T,plot=True)
     # KF Tunings
-    Q_LKF = np.diag([1e-2,1e-2])
+    Q_LKF = np.diag([1e-6,1e-6])
     P0_LKF = np.diag([3.5,0.7,3.5,0.7])
     
     start = time()
