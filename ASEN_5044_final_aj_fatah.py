@@ -609,7 +609,7 @@ def monte_carlo_measurements_tmt(x0,Qtrue,Rtrue,T,plot=False):
 
     return y_soln
 
-def LKF(x0, P0, dT, T, Qtrue, Rtrue, ydata, Q_LKF = np.eye(2)*1e-10, plot=False):
+def LKF(x0, dx0, P0, dT, T, Qtrue, Rtrue, ydata, Q_LKF = np.eye(2)*1e-10, plot=False):
     """
     Implement and tune a linearized KF using the specified nominal state trajectory
     """
@@ -657,12 +657,11 @@ def LKF(x0, P0, dT, T, Qtrue, Rtrue, ydata, Q_LKF = np.eye(2)*1e-10, plot=False)
     # initialize at t=0
     x_hat_plus = np.array(x0)
     P_plus = P0
-    dx0 = [2,0.075,2,-0.075]
     dx_hat_vals = np.random.multivariate_normal(dx0, P_plus)
     dx_hat_plus = np.array([[dx_hat_vals[0]],[dx_hat_vals[1]],[dx_hat_vals[2]],[dx_hat_vals[3]]])
     du = np.zeros((2,1))
 
-    F_tilde, G_tilde, Omega_tilde, H_tilde_all = eulerized_dt_jacobians(x0, dT, 0)
+    F_tilde, G_tilde, Omega_tilde, H_tilde_all = eulerized_dt_jacobians(x_hat_plus + dx_hat_plus, dT, 0)
     
     x_hat_plus_tot   = x_hat_plus + dx_hat_plus       # ie nominal + perturb
     vis_station_list = []
@@ -684,10 +683,6 @@ def LKF(x0, P0, dT, T, Qtrue, Rtrue, ydata, Q_LKF = np.eye(2)*1e-10, plot=False)
         # TIME UPDATE/PREDICTION STEP FOR TIME k+1
         dx_hat_minus = F_tilde@dx_hat_plus + G_tilde@du
         P_minus      = (F_tilde@P_plus@(F_tilde.T)) + (Omega_tilde@Q_LKF@(Omega_tilde.T))
-
-        # MEASUREMENT UPDATE/CORRECTION STEP FOR TIME k+1
-        # FOR NEXT TIMESTEP, calculate new F_tilde, G_tilde, Omega_tilde, H_tilde_all
-        F_tilde, G_tilde, Omega_tilde, H_tilde_all = eulerized_dt_jacobians(x_nom, dT, t)
 
         # actual received sensor measurement
         y_full_vect = ydata[t_idx]
@@ -750,13 +745,13 @@ def LKF(x0, P0, dT, T, Qtrue, Rtrue, ydata, Q_LKF = np.eye(2)*1e-10, plot=False)
             P_plus = (np.identity(np.shape(P_minus)[0]) - (K@H_tilde))@P_minus
 
             # state perturbation estimate
-            dx_hat_plus = dx_hat_minus + K@(dy - (H_tilde@dx_hat_minus))
+            dx_hat_plus = dx_hat_minus + K@(dy - H_tilde@dx_hat_minus)
 
             # ADD TO NOMINAL STATE ESTIMATE
             x_hat_plus = x_nom + dx_hat_plus
             
             # NIS Calculation
-            NIS_list.append(NIS(yk1, ystar, S_k))
+            NIS_list.append(NIS(dy, H_tilde@dx_hat_minus, S_k))
         
         else: 
             # Covariance Matrix
@@ -771,8 +766,12 @@ def LKF(x0, P0, dT, T, Qtrue, Rtrue, ydata, Q_LKF = np.eye(2)*1e-10, plot=False)
         
         x_hat_plus_tot  = np.concatenate((x_hat_plus_tot, np.array(x_hat_plus)), axis=1)
         P_list.append(P_plus)
-
+        #print(np.diag(P_plus))    
         t_list.append(t)
+        
+        # MEASUREMENT UPDATE/CORRECTION STEP FOR TIME k+1
+        # FOR NEXT TIMESTEP, calculate new F_tilde, G_tilde, Omega_tilde, H_tilde_all
+        F_tilde, G_tilde, Omega_tilde, H_tilde_all = eulerized_dt_jacobians(x_nom, dT, t)
         
         # NEES Calculation
         NEES_list.append(NEES(x_tmt.y[:,t_idx], x_hat_plus, P_plus))
@@ -940,9 +939,8 @@ def EKF(x0, P0, dT, T, Qtrue, Rtrue, ydata, Q_EKF = np.eye(2)*1e-10, plot=False)
     x_hat_plus = np.random.multivariate_normal(mean=[x0[0][0], x0[1][0], x0[2][0], x0[3][0]], cov=P_plus).reshape((4,1))
     du = np.zeros((2,1))
 
-    F_tilde, G_tilde, Omega_tilde, H_tilde_all = eulerized_dt_jacobians(x0, x0, dT, 0)
-    Q = Q_EKF
-    
+    F_tilde, G_tilde, Omega_tilde, H_tilde_all = eulerized_dt_jacobians(x0, x_hat_plus, dT, 0)
+  
     x_hat_plus_tot   = x_hat_plus       # ie nominal + perturb
     vis_station_list = []
     P_list           = [P_plus]
@@ -966,14 +964,13 @@ def EKF(x0, P0, dT, T, Qtrue, Rtrue, ydata, Q_EKF = np.eye(2)*1e-10, plot=False)
         F_tilde, G_tilde, Omega_tilde, H_tilde_all = eulerized_dt_jacobians(x_hat_minus, x_hat_plus, dT, t)
         
         #import pdb; pdb.set_trace()
-        P_minus     = (F_tilde@P_plus@(F_tilde.T)) + (Omega_tilde@Q@(Omega_tilde.T))
+        P_minus     = (F_tilde@P_plus@(F_tilde.T)) + (Omega_tilde@Q_EKF@(Omega_tilde.T))
 
 
         # MEASUREMENT UPDATE/CORRECTION STEP FOR TIME k+1
         # actual received sensor measurement
         y_full_vect = ydata[t_idx]
         if y_full_vect.size != 0:
-            Q = Q_EKF
             visible_stations = y_full_vect[3,:]
             H_tilde = np.array([])
             yk1     = np.array([])
@@ -1034,7 +1031,7 @@ def EKF(x0, P0, dT, T, Qtrue, Rtrue, ydata, Q_EKF = np.eye(2)*1e-10, plot=False)
             x_hat_plus = x_hat_minus + K@innov
             
             # NIS Calculation
-            NIS_list.append(NIS(yk1, ystar, S_k))
+            NIS_list.append(NIS(innov, H_tilde@x_hat_minus, S_k))
         
         else: 
             
@@ -1046,8 +1043,6 @@ def EKF(x0, P0, dT, T, Qtrue, Rtrue, ydata, Q_EKF = np.eye(2)*1e-10, plot=False)
             
             # NIS Calculation
             NIS_list.append(np.nan)
-            
-            Q = 1e+3 * Q_EKF
         
         x_hat_plus_tot  = np.concatenate((x_hat_plus_tot, np.array(x_hat_plus)), axis=1)
         P_list.append(P_plus)
@@ -1167,8 +1162,8 @@ if __name__ == "__main__":
     T = 14000   # HARD-CODED
     
     # Monte-Carlo parameters
-    np.random.seed(100)  # Random Set Seed
-    num_mc_runs = 10     # Number of Monte-Carlo Runs
+    #np.random.seed(100)  # Random Set Seed
+    num_mc_runs = 50     # Number of Monte-Carlo Runs
     alpha = 0.05         # Confidence
     
     T_tot = round(np.sqrt((4*(np.pi**2)*(r0**3))/mu))   # orbital period, s
@@ -1202,10 +1197,14 @@ if __name__ == "__main__":
     measLabels = (pd.read_csv(os.path.join(input_files_dir, 'measLabels.csv'), header=None)).values.tolist()    # labels for measurements dataframe
     ydata = loadmat(os.path.join(input_files_dir,'orbitdeterm_finalproj_KFdata.mat'))['ydata'][0]
 
-    ydata_sim = monte_carlo_measurements_tmt(x0,Qtrue,Rtrue,T,plot=True)
+    ydata_sim = monte_carlo_measurements_tmt(x0,Qtrue,Rtrue,T,plot=False)
+    
     # KF Tunings
-    Q_LKF = np.diag([1e-6,1e-6])
-    P0_LKF = np.diag([3.5,0.7,3.5,0.7])
+    dx0 = [0,0.075,0,-0.021]
+    pos_sigma = 10
+    vel_sigma = 3
+    P0_LKF = np.diag([pos_sigma**2,vel_sigma**2,pos_sigma**2,vel_sigma**2])
+    Q_LKF = np.array([[5e-6, 0], [0, 5e-6]])
     
     start = time()
     NEES_array = []
@@ -1216,14 +1215,15 @@ if __name__ == "__main__":
             plot_arg = True
         else:
             plot_arg = False
-        res_lkf = LKF(x0, P0_LKF, dT, T, Qtrue, Rtrue, ydata_sim, Q_LKF=Q_LKF, plot=plot_arg)#, plot=True)
+        res_lkf = LKF(x0, dx0, P0_LKF, dT, T, Qtrue, Rtrue, ydata, Q_LKF=Q_LKF, plot=plot_arg)#, plot=True)
         NEES_array.append(res_lkf[3])
         NIS_array.append(res_lkf[4])
-    print("LKF elapsed:", time() - start)
-    print(NIS_array[0])
+        if i % 10 == 9:
+            print("LKF elapsed:", time() - start)
+    #print(NIS_array[0])
         
-    nis_lkf, stat_nis_lkf = NIS_Chi2_Test(np.asarray(NIS_array).T, num_meas, num_mc_runs, alpha, title="LKF NIS Testing", plot=True)    
-    NEES_Chi2_Test(np.asarray(NEES_array).T, num_states, num_mc_runs, alpha, title="LKF NEES Testing")
+    nis_lkf, stat_nis_lkf = NIS_Chi2_Test(np.asarray(NIS_array).T, num_meas, num_mc_runs, alpha, title="LKF NIS Testing Real", plot=True)    
+    NEES_Chi2_Test(np.asarray(NEES_array).T, num_states, num_mc_runs, alpha, title="LKF NEES Testing Real", plot=True)
     
     print(stat_nis_lkf)
     
